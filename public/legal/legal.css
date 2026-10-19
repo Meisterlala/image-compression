@@ -1,0 +1,49 @@
+:root {
+  color-scheme: light;
+  --page-ink: #1b302b;
+  --page-background: #f3f5f4;
+  --link: #206b50;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page-ink: #e3ede7;
+    --page-background: #101716;
+    --link: #91d6ad;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 40px 20px;
+  color: var(--page-ink);
+  background: var(--page-background);
+  font: 15px/1.8 system-ui, sans-serif;
+}
+
+.legal-page {
+  max-width: 760px;
+  margin: auto;
+}
+
+.legal-page h1 {
+  margin: 35px 0 20px;
+  font-size: 30px;
+  line-height: 1.2;
+}
+
+.legal-page h2 {
+  margin-top: 35px;
+  font-size: 20px;
+}
+
+.legal-page a {
+  color: var(--link);
+  text-underline-offset: 3px;
+}
+
+.legal-page code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

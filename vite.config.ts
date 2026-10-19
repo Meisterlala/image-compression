@@ -1,0 +1,16 @@
+import { defineConfig } from 'vitest/config';
+import vue from '@vitejs/plugin-vue';
+
+const isolationHeaders = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+};
+
+export default defineConfig({
+  plugins: [vue()],
+  server: { headers: isolationHeaders, port: 5173 },
+  preview: { headers: isolationHeaders, port: 4173 },
+  worker: { format: 'es' },
+  build: { target: 'es2022', assetsInlineLimit: 0 },
+  test: { include: ['src/**/*.test.ts'] },
+});

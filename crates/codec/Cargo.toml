@@ -1,0 +1,29 @@
+[package]
+name = "compression-codec"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+model-packer = ["zenjpegai/pth"]
+
+[dependencies]
+zenjpegai = { git = "https://github.com/imazen/zenjpegai", rev = "1192fca6b6c2fdc4dcf29a6c8064c53a987caf59", default-features = false, features = ["std", "unstable-internals", "wasm-clock"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+
+[[bin]]
+name = "pack-models"
+path = "src/bin/pack-models.rs"
+required-features = ["model-packer"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

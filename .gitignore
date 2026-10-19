@@ -1,0 +1,10 @@
+node_modules/
+dist/
+src/wasm/
+crates/codec/target/
+.cache/
+public/models/*.zjb
+public/source.tar.gz
+playwright-report/
+test-results/
+.env*

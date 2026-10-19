@@ -1,0 +1,30 @@
+{
+  "revision": "b9e573fef1dd90408270da23aae678c823f15525",
+  "operatingPoint": "bop",
+  "models": [
+    {
+      "id": 0,
+      "file": "bop-m0.zjb",
+      "bytes": 27129536,
+      "sha256": "ad64150e3fb3c4b5ba9a7c02f3589f6ec31f721a2698bbf697595dfc2bc709c5"
+    },
+    {
+      "id": 1,
+      "file": "bop-m1.zjb",
+      "bytes": 27129536,
+      "sha256": "c0913ef36f96f7cf57f7608dac86fddc8082b574ad2e1529b99d055c34e5a196"
+    },
+    {
+      "id": 2,
+      "file": "bop-m2.zjb",
+      "bytes": 27129536,
+      "sha256": "c3c3739e02c829b083470e1ecea9736a96a18e212c4de3416cc322d42aeba716"
+    },
+    {
+      "id": 3,
+      "file": "bop-m3.zjb",
+      "bytes": 27129536,
+      "sha256": "ac6896f0d292bbbbacdba8b2b9a450778d741a5d86c6c6df1b5bfc89abf6340b"
+    }
+  ]
+}

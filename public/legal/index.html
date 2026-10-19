@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Image compression demo — about & licenses</title>
+    <link rel="stylesheet" href="./legal.css">
+  </head>
+  <body>
+    <main class="legal-page">
+      <a href="../">← Back to Image compression demo</a>
+      <h1>Implementation & licenses</h1>
+      <p>Image compression demo is a static, client-side compression demonstration. Your image is read locally; no upload endpoint, external analytics, remote inference, or third-party fonts are used. Encoding, output decoding and quality metrics run in WebAssembly on your CPU. The browser imports images and prepares 8-bit sRGB pixels using its canvas APIs.</p>
+      <h2>JPEG AI is experimental</h2>
+      <p>JPEG AI is the learned image compression standard ISO/IEC 6048-1. This application uses <a href="https://github.com/imazen/zenjpegai">zenjpegai</a>, pinned to commit <code>1192fca6b6c2fdc4dcf29a6c8064c53a987caf59</code>. This is not a certification of conformance. The .jai extension is a project convention, not a claim of a registered media type or native browser support.</p>
+      <p>All four trained BOP models are available inline under the JPEG AI pane’s settings. Weights are separate from the compressed image. One encoder/decoder bundle is about 26 MiB; target-bitrate search needs about 104 MiB. Downloads are verified with SHA-256 before use and may be cached in your browser. You can explicitly download, remove, export and re-import verified weights through the library. Browser storage may be evicted.</p>
+      <p>The initial version uses only the BOP profile with advanced coding tools off. It supports fixed-model quantisation and target-bpp search. It does not provide HDR, animation, alpha preservation, arbitrary model files, WebGPU or a server fallback.</p>
+      <h2>Software and model licenses</h2>
+      <p>This application's corresponding source is provided under <a href="./AGPL-3.0.txt">AGPL-3.0</a>. zenjpegai is AGPL-3.0 or commercially licensed by its author. This build uses the AGPL option. <a href="../source.tar.gz" download>Download this build's source and build scripts</a>. Dependency sources are pinned in the included lockfiles; build instructions are in README.md.</p>
+      <p>The JPEG AI reference weights derive from the <a href="https://gitlab.com/wg1/jpeg-ai/jpeg-ai-reference-software">ITU/ISO/IEC reference software</a>, pinned to commit <code>b9e573fef1dd90408270da23aae678c823f15525</code>. The <a href="./jpeg-ai-reference-LICENSE.txt">upstream BSD license and notices</a> are embedded in every packed model bundle and reproduced here.</p>
+      <p><strong>The upstream notice explicitly reserves third-party and patent rights.</strong> Neither open-source licensing nor this demo is a patent clearance or a grant of codec patent rights. Review the relevant terms before redistribution or commercial deployment.</p>
+      <h2>Comparison codecs and dependencies</h2>
+      <ul>
+        <li><a href="https://github.com/jamsinclair/jSquash">jSquash</a> wrappers: Apache-2.0; JPEG uses MozJPEG, AVIF uses libavif/libaom and a WASM decoder, JPEG XL uses libjxl. See the <a href="./THIRD_PARTY.md">third-party notices</a> and accompanying license files.</li>
+        <li>Vue: MIT. Rust dependency sources and licenses are listed in crates/codec/Cargo.lock in the source download.</li>
+      </ul>
+      <h2>What the numbers mean</h2>
+      <p>Encoded size includes the output file/container, not the separate model or WASM downloads. The primary compression ratio is raw working RGB bytes (width × height × 3) divided by encoded file bytes. Upload-to-encoded ratio is shown separately in the file details because the uploaded image may have different dimensions. PSNR and MSE use RGB channels; SSIM uses non-overlapping 8×8 Rec.709 luma windows with population variance, K1=.01, K2=.03 and L=255. This is not MS-SSIM. Identical pixels have infinite PSNR. None of these metrics is a guarantee of perceptual fidelity.</p>
+      <p>Startup, encoding, decoding and metric times are measured separately for each codec. Encode time and decode time are equally prominent in each of the four panes. Jobs run one at a time to avoid CPU contention, and settings/results are independent. Every job starts a fresh worker; model downloads/cache reads and WASM initialization are startup work. The memory number is an upstream estimate of the encode working set, not a measured peak of the whole browser.</p>
+      <p>For transparency, source images are composited on white; large images are resized before encoding. Resizing affects the result. Files are capped at 40 MiB, imported images at 40 megapixels after browser decoding, and working images at a 1024-pixel maximum edge. Malformed source decoders may allocate memory before the dimension check; this app is not a sandbox for hostile images.</p>
+    </main>
+  </body>
+</html>

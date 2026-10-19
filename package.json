@@ -1,0 +1,34 @@
+{
+  "name": "wasm-image-compression-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "models": "node scripts/prepare-models.mjs",
+    "build": "npm run build:wasm && npm run source && npm run build:web",
+    "source": "node scripts/package-source.mjs",
+    "build:web": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "cargo test --manifest-path crates/codec/Cargo.toml && vitest run",
+    "test:e2e": "playwright test",
+    "check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@jsquash/avif": "2.1.1",
+    "@jsquash/jpeg": "1.6.0",
+    "@jsquash/jxl": "1.3.0",
+    "vue": "^3.5.22"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^24.0.0",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.0",
+    "vitest": "^3.2.4",
+    "vue-tsc": "^3.1.0"
+  }
+}
