@@ -15,6 +15,11 @@ fn point(value: &str) -> Result<OperatingPoint, JsError> {
     }
 }
 
+#[wasm_bindgen(js_name = coolChicSoapBasis)]
+pub fn soap_basis(gram: &[f32], previous: Option<Vec<f32>>) -> Result<Vec<f32>, JsError> {
+    crate::reference::soap::Soap::gpu_basis(gram, previous.as_deref()).map_err(error)
+}
+
 #[wasm_bindgen(js_name = estimateCoolChicMemory)]
 pub fn estimate_memory(width: usize, height: usize, operating_point: &str) -> Result<f64, JsError> {
     let architecture =
@@ -110,6 +115,66 @@ pub fn cpu_convolution(
         Ok([g.input.data, g.weight, g.bias].concat())
     } else {
         Ok(layer.forward(&input).map_err(error)?.data)
+    }
+}
+
+/// Equal-input optimizer diagnostics, used to check GPU SOAP independently of
+/// shader/autodiff rounding in the neural graph.
+#[wasm_bindgen]
+pub struct CoolChicSoapProblem {
+    optimizer: crate::reference::soap::Soap,
+    parameter: Vec<f32>,
+    latent: bool,
+}
+#[wasm_bindgen]
+impl CoolChicSoapProblem {
+    #[wasm_bindgen(constructor)]
+    pub fn new(shape: Vec<u32>, latent: bool) -> Result<CoolChicSoapProblem, JsError> {
+        use crate::reference::soap::{Config, Soap};
+        let shape: Vec<_> = shape.into_iter().map(|d| d as usize).collect();
+        let optimizer = Soap::new(
+            shape,
+            if latent {
+                Config::latent(0.01)
+            } else {
+                Config::network(0.01)
+            },
+        )
+        .map_err(error)?;
+        let parameter = (0..optimizer.first_moment.len())
+            .map(|i| ((i * 7 % 29) as f32 - 14.0) / 31.0)
+            .collect();
+        Ok(Self {
+            optimizer,
+            parameter,
+            latent,
+        })
+    }
+    pub fn descriptor(&self) -> String {
+        let mut state = self.parameter.clone();
+        let tensor = self.optimizer.gpu_pack(0, self.latent, &mut state);
+        serde_json::json!({"size":state.len(),"parameters":self.parameter.len(),"tensors":[tensor]})
+            .to_string()
+    }
+    pub fn state(&self) -> Vec<f32> {
+        let mut state = self.parameter.clone();
+        self.optimizer.gpu_pack(0, self.latent, &mut state);
+        state
+    }
+    pub fn update(&mut self, mut gradient: Vec<f32>, learning_rate: f64) -> Result<(), JsError> {
+        if !self.latent {
+            let norm = gradient.iter().map(|v| v * v).sum::<f32>().sqrt();
+            let coefficient = (0.1 / ((norm * norm).sqrt() + 1e-6)).min(1.0);
+            for v in &mut gradient {
+                *v *= coefficient;
+            }
+        }
+        self.optimizer
+            .set_learning_rate(learning_rate)
+            .map_err(error)?;
+        self.optimizer
+            .update(&mut self.parameter, &gradient)
+            .map_err(error)
     }
 }
 

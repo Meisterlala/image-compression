@@ -260,6 +260,114 @@ impl Soap {
         }
     }
 
+    /// Compact state shared with the GPU optimizer. Matrix storage on the wire
+    /// is row-major; nalgebra's internal column-major order is never exposed.
+    #[cfg(any(feature = "wasm", test))]
+    pub(crate) fn gpu_pack(
+        &self,
+        offset: usize,
+        latent: bool,
+        state: &mut Vec<f32>,
+    ) -> serde_json::Value {
+        use serde_json::json;
+        let first = state.len();
+        state.extend(&self.first_moment);
+        let second = state.len();
+        state.extend(&self.second_moment);
+        let mut axes = Vec::new();
+        for (axis, gram) in self.gram.iter().enumerate() {
+            if let Some(gram) = gram {
+                let dimension = self.shape[axis];
+                let gram_offset = state.len();
+                for row in 0..dimension {
+                    for col in 0..dimension {
+                        state.push(gram[(row, col)]);
+                    }
+                }
+                let basis_offset = state.len();
+                for row in 0..dimension {
+                    for col in 0..dimension {
+                        state.push(self.basis[axis].as_ref().map_or(0.0, |q| q[(row, col)]));
+                    }
+                }
+                let order = state.len();
+                state.resize(order + dimension, 0.0);
+                axes.push(json!({"dimension":dimension,"stride":self.shape[axis+1..].iter().product::<usize>(),"gram":gram_offset,"basis":basis_offset,"order":order}));
+            }
+        }
+        json!({"offset":offset,"length":self.first_moment.len(),"first":first,"second":second,"latent":latent,"axes":axes})
+    }
+
+    #[cfg(any(feature = "wasm", test))]
+    pub(crate) fn gpu_unpack(&mut self, state: &[f32], cursor: &mut usize, step: usize) {
+        let n = self.first_moment.len();
+        self.first_moment
+            .copy_from_slice(&state[*cursor..*cursor + n]);
+        *cursor += n;
+        self.second_moment
+            .copy_from_slice(&state[*cursor..*cursor + n]);
+        *cursor += n;
+        for axis in 0..self.shape.len() {
+            if let Some(gram) = &mut self.gram[axis] {
+                let d = self.shape[axis];
+                *gram = DMatrix::from_row_slice(d, d, &state[*cursor..*cursor + d * d]);
+                *cursor += d * d;
+                self.basis[axis] = Some(DMatrix::from_row_slice(
+                    d,
+                    d,
+                    &state[*cursor..*cursor + d * d],
+                ));
+                *cursor += d * d + d;
+            }
+        }
+        self.initialized = true;
+        self.step = step;
+    }
+
+    #[cfg(any(feature = "wasm", test))]
+    pub(crate) fn gpu_step(&self) -> i32 {
+        if self.initialized {
+            self.step as i32
+        } else {
+            -1
+        }
+    }
+
+    /// Use exactly the reference eigensolver/QR for the GPU's small basis
+    /// refreshes. Returns a row-major basis followed by the variance permutation.
+    #[cfg(any(feature = "wasm", test))]
+    pub fn gpu_basis(gram: &[f32], previous: Option<&[f32]>) -> Result<Vec<f32>> {
+        let d = (gram.len() as f64).sqrt() as usize;
+        if d == 0
+            || d > 256
+            || d * d != gram.len()
+            || gram.iter().any(|v| !v.is_finite())
+            || previous.is_some_and(|q| q.len() != gram.len() || q.iter().any(|v| !v.is_finite()))
+        {
+            return Err(Error("Invalid GPU SOAP basis input"));
+        }
+        let mut soap = Self::new(vec![d], Config::network(0.01))?;
+        soap.gram[0] = Some(DMatrix::from_row_slice(d, d, gram));
+        soap.second_moment = (0..d).map(|i| i as f32).collect();
+        if let Some(q) = previous {
+            soap.basis[0] = Some(DMatrix::from_row_slice(d, d, q));
+            soap.refresh_basis();
+        } else {
+            soap.initialize_basis()?;
+        }
+        let q = soap.basis[0]
+            .as_ref()
+            .ok_or(Error("GPU SOAP basis missing"))?;
+        let mut result = Vec::with_capacity(d * d + d);
+        for row in 0..d {
+            for col in 0..d {
+                result.push(q[(row, col)]);
+            }
+        }
+        result.extend(soap.second_moment);
+        Ok(result)
+    }
+
     pub fn update(&mut self, parameter: &mut [f32], gradient: &[f32]) -> Result<()> {
         if parameter.len() != self.first_moment.len()
             || gradient.len() != parameter.len()
@@ -305,5 +413,60 @@ impl Soap {
         }
         self.first_moment = self.project(&self.first_moment, false);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod gpu_state_tests {
+    use super::*;
+
+    #[test]
+    fn packed_gpu_state_resumes_the_reference_optimizer() {
+        for (shape, config) in [
+            (vec![3, 3], Config::network(0.01)),
+            (vec![1, 1, 7, 9], Config::latent(0.01)),
+        ] {
+            let mut reference = Soap::new(shape.clone(), config).unwrap();
+            let mut restored = Soap::new(shape, config).unwrap();
+            let mut parameters = vec![0.25; reference.first_moment.len()];
+            for i in 0..23 {
+                let gradient: Vec<_> = (0..parameters.len())
+                    .map(|j| ((j * 7 + i * 13) % 31) as f32 / 31.0 - 0.5)
+                    .collect();
+                reference.update(&mut parameters, &gradient).unwrap();
+                let mut state = parameters.clone();
+                reference.gpu_pack(0, config.max_precondition_dim == 0, &mut state);
+                let mut cursor = parameters.len();
+                restored.gpu_unpack(&state, &mut cursor, reference.step);
+                assert_eq!(cursor, state.len());
+                assert_eq!(restored.gpu_step(), reference.gpu_step());
+                let mut actual = parameters.clone();
+                let mut expected = parameters.clone();
+                restored.update(&mut actual, &gradient).unwrap();
+                reference.clone().update(&mut expected, &gradient).unwrap();
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn basis_helper_matches_reference_initialization_and_refresh() {
+        let mut soap = Soap::new(vec![2], Config::network(0.01)).unwrap();
+        soap.gram[0] = Some(DMatrix::from_row_slice(2, 2, &[4.0, 1.0, 1.0, 2.0]));
+        soap.initialize_basis().unwrap();
+        let initial = Soap::gpu_basis(&[4.0, 1.0, 1.0, 2.0], None).unwrap();
+        let q = soap.basis[0].as_ref().unwrap();
+        assert_eq!(&initial[..4], &[q[(0, 0)], q[(0, 1)], q[(1, 0)], q[(1, 1)]]);
+        soap.second_moment = vec![0.0, 1.0];
+        soap.refresh_basis();
+        let refreshed = Soap::gpu_basis(&[4.0, 1.0, 1.0, 2.0], Some(&initial[..4])).unwrap();
+        let q = soap.basis[0].as_ref().unwrap();
+        assert_eq!(
+            &refreshed[..4],
+            &[q[(0, 0)], q[(0, 1)], q[(1, 0)], q[(1, 1)]]
+        );
+        assert_eq!(&refreshed[4..], &soap.second_moment);
+        assert!(Soap::gpu_basis(&[f32::NAN], None).is_err());
+        assert!(Soap::gpu_basis(&[1.0, 2.0], None).is_err());
     }
 }
