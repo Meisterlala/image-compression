@@ -150,6 +150,14 @@ impl CoolChicGraphProblem {
     pub fn noise(&self) -> Vec<f32> {
         self.noise.clone()
     }
+    #[wasm_bindgen(js_name = cpuLoss)]
+    pub fn cpu_loss(&self, lambda: f32) -> Result<f32, JsError> {
+        Ok(self
+            .network
+            .evaluate(&self.target, lambda)
+            .map_err(error)?
+            .loss)
+    }
     #[wasm_bindgen(js_name = cpuGradient)]
     pub fn cpu_gradient(
         &self,

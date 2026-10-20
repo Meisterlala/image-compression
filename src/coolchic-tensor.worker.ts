@@ -19,7 +19,8 @@ self.onmessage = async ({ data }: MessageEvent<Request>) => {
     const input = new Float32Array(data.shared, HEADER, data.inputLength);
     let offset = 0;
     const take = (length: number) => { const values = input.subarray(offset, offset + length); offset += length; return values; };
-    const parameters = take(data.parameters), latents = take(data.latents), noise = take(data.latents);
+    const evaluation = data.options[0] === 5;
+    const parameters = take(data.parameters), latents = take(data.latents), noise = take(evaluation ? 0 : data.latents);
     if (data.fresh) {
       graph?.dispose(); graph = undefined;
       const target = take(data.target), common = take(data.common);
@@ -28,7 +29,8 @@ self.onmessage = async ({ data }: MessageEvent<Request>) => {
     }
     if (!graph || currentSpec !== data.spec) throw new Error('GPU tensor graph not initialized');
     const [mode, temperature, lambda, normalizer] = data.options;
-    const result = await graph.gradient(parameters, latents, noise, { mode, temperature, lambda, normalizer });
+    const result = evaluation ? new Float32Array([await graph.evaluate(parameters, latents, lambda)])
+      : await graph.gradient(parameters, latents, noise, { mode, temperature, lambda, normalizer });
     if (result.length !== data.outputLength) throw new Error('GPU gradient output length mismatch');
     new Float32Array(data.shared, HEADER + data.inputLength * 4, data.outputLength).set(result);
     Atomics.store(control, 0, 1);

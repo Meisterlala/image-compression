@@ -18,21 +18,28 @@ class Program implements WebGPUProgram {
   getUserCode() { return this.code; }
 }
 const run = (name: string, inputs: tf.NamedTensorMap, attrs: Attrs) => tf.engine().runKernel(name, inputs, attrs) as tf.Tensor;
+const roundEven = `fn roundEven(x: f32) -> f32 {
+  let low = floor(x); let fraction = x-low;
+  if (fraction < 0.5) { return low; } if (fraction > 0.5) { return low+1.0; }
+  return select(low,low+1.0,i32(low)%2 != 0);
+}`;
 const body = (code: string) => `${main('index')} { if (index >= uniforms.size) { return; } ${code} }`;
 function kernel(name: string, create: (inputs: tf.NamedTensorInfoMap, attrs: Attrs, backend: WebGPUBackend) => tf.TensorInfo) {
   tf.registerKernel({ kernelName: name, backendName: 'webgpu', kernelFunc: args => create(args.inputs as tf.NamedTensorInfoMap, args.attrs as Attrs, args.backend as WebGPUBackend) });
 }
 
 export function registerFusedCoolChicKernels() {
+  kernel('CoolMseGrad', (inputs,_attrs,backend) => backend.runWebGPUProgram(new Program(inputs.raw!.shape,['raw','truth','dy'],body(`
+    let value = getRawByOutputIndex(index); var gradient = 0.0;
+    if(value > 0.0 && value < 1.0) { gradient = (2.0*(value-getTruthByOutputIndex(index))/f32(uniforms.size))*getDyByOutputIndex(index); }
+    setOutputAtIndex(index,gradient);`)),[inputs.raw!,inputs.truth!,inputs.dy!],'float32'));
+  kernel('CoolImageQuant', (inputs, _attrs, backend) => backend.runWebGPUProgram(
+    new Program(inputs.x!.shape, ['x'], roundEven + body('setOutputAtIndex(index,roundEven(clamp(getXByOutputIndex(index),0.0,1.0)*255.0)/255.0);')),
+    [inputs.x!], 'float32'));
   for (const gradient of [false, true]) kernel(gradient ? 'CoolQuantGrad' : 'CoolQuant', (inputs, attrs, backend) => {
     const x = inputs.x!, mode = attrs.mode as number, temp = attrs.temperature as number, normalizer = attrs.normalizer as number;
     const t = float(mode === 1 || mode === 2 ? temp : 1), norm = float(mode === 1 || mode === 2 ? normalizer : 1);
-    const pair = `fn roundEven(x: f32) -> f32 {
-      let low = floor(x); let fraction = x-low;
-      if (fraction < 0.5) { return low; } if (fraction > 0.5) { return low+1.0; }
-      return select(low,low+1.0,i32(low)%2 != 0);
-    }
-    fn softPair(x: f32) -> vec2<f32> {
+    const pair = roundEven + `fn softPair(x: f32) -> vec2<f32> {
       let f = floor(x); let v = tanh((x - f - 0.5) / ${t});
       return vec2<f32>(f + 0.5 * v / ${norm} + 0.5, 0.5 * (1.0 - v*v) / (${t} * ${norm}));
     }`;
@@ -45,6 +52,16 @@ export function registerFusedCoolChicKernels() {
     const names = gradient ? (mode === 0 ? ['dy'] : mode === 1 ? ['x','dy'] : ['x','noise','dy'])
       : (mode === 1 || mode >= 3 ? ['x'] : ['x','noise']);
     return backend.runWebGPUProgram(new Program(x.shape, names, code), names.map(name => inputs[name]!), 'float32');
+  });
+  for (const gradient of [false,true]) kernel(gradient ? 'CoolExpandGrad' : 'CoolExpand', (inputs,attrs,backend) => {
+    const shape = attrs.shape as number[], h = attrs.height as number, w = attrs.width as number;
+    const output = gradient ? shape : [shape[0],h,w,shape[3]], names = gradient ? ['dy'] : ['x'];
+    const code = body(gradient ? `let c = getCoordsFromIndex(index); var value = 0.0;
+      for(var y=0;y<2;y++) { for(var x=0;x<2;x++) {
+        if(c[1]*2+y < ${h} && c[2]*2+x < ${w}) { value += getDy(c[0],c[1]*2+y,c[2]*2+x,c[3]); }
+      } } setOutputAtIndex(index,value);`
+      : 'let c = getCoordsFromIndex(index); setOutputAtIndex(index,getX(c[0],c[1]/2,c[2]/2,c[3]));');
+    return backend.runWebGPUProgram(new Program(output,names,code),names.map(name=>inputs[name]!), 'float32');
   });
   tf.registerKernel({ kernelName: 'CoolRate_prepare', backendName: 'webgpu', kernelFunc: args => {
     const { x, raw } = args.inputs as tf.NamedTensorInfoMap, backend = args.backend as WebGPUBackend;
@@ -169,6 +186,25 @@ function registerAxis() {
   });
 }
 
+export function fusedClippedMse(raw: T4, target: T4, image: T4): tf.Scalar {
+  const op = tf.customGrad<tf.Scalar>((...args) => {
+    const input = args[0] as T4, save = args[1] as tf.GradSaveFunc;
+    save([input,target]);
+    return { value:image.sub(target).square().mean() as tf.Scalar,
+      gradFunc:(dy:tf.Scalar,saved:tf.Tensor[])=>run('CoolMseGrad',{raw:saved[0],truth:saved[1],dy},{}) };
+  });
+  return op(raw);
+}
+export function fusedExpand(x: T4, height: number, width: number): T4 {
+  if(height > x.shape[1]*2 || width > x.shape[2]*2) throw new Error('Invalid IFCE expansion');
+  const attrs = { shape:x.shape,height,width };
+  // Integer x2 addressing in both directions: generic nearest-neighbour
+  // backprop's divide-then-multiply can round an exact boundary down on odd grids.
+  const op = tf.customGrad<T4>((...args)=>({ value:run('CoolExpand',{x:args[0] as T4},attrs) as T4,
+    gradFunc:(dy:T4)=>run('CoolExpandGrad',{dy},attrs) }));
+  return op(x);
+}
+export function fusedImageQuant(x: T4): T4 { return run('CoolImageQuant', { x }, {}) as T4; }
 export function fusedQuantize(x: T4, noise: T4, options: { mode: number; temperature: number; normalizer?: number }): T4 {
   const attrs = { ...options, normalizer: options.normalizer ?? Math.fround(Math.tanh(Math.fround(1 / Math.fround(2 * options.temperature)))) };
   const op = tf.customGrad<T4>((...args) => {

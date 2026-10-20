@@ -65,16 +65,14 @@ mod browser {
             Float32Array::from(data)
         }
     }
-    pub fn gradient(
+    fn request(
         network: &Network,
         target: &Tensor,
-        lambda: f32,
-        mode: Quantizer,
-        temperature: f32,
+        options: [f32; 4],
         noise: &[f32],
-    ) -> Option<ParameterGradient> {
+    ) -> Option<(Vec<f32>, Vec<usize>)> {
         let callback = BACKEND.with_borrow(Clone::clone)?;
-        let gradient = (|| {
+        let response = (|| {
             let groups = network.parameters().0;
             let group_lengths: Vec<_> = groups.iter().map(Vec::len).collect();
             let parameters: Vec<_> = groups.into_iter().flatten().collect();
@@ -88,18 +86,6 @@ mod browser {
                 .iter()
                 .flat_map(|l| l.data.iter().copied())
                 .collect();
-            let kind = match mode {
-                Quantizer::None => 0.0,
-                Quantizer::SoftAlone => 1.0,
-                Quantizer::Soft => 2.0,
-                Quantizer::StraightThrough => 3.0,
-                Quantizer::Hard => 4.0,
-            };
-            let normalizer = if matches!(mode, Quantizer::Soft | Quantizer::SoftAlone) {
-                (1.0 / (2.0 * temperature)).tanh()
-            } else {
-                1.0
-            };
             let result = callback.call7(
                 &JsValue::NULL,
                 &JsValue::from_str(&descriptor(network)),
@@ -108,12 +94,17 @@ mod browser {
                 &array(&target.data),
                 &array(noise),
                 &array(&common),
-                &Float32Array::from([kind, temperature, lambda, normalizer].as_slice()),
+                &Float32Array::from(options.as_slice()),
             );
             let values = result
                 .ok()
                 .and_then(|v| v.dyn_into::<Float32Array>().ok())?;
-            if values.length() as usize != parameters.len() + latents.len() {
+            let expected = if options[0] == 5.0 {
+                1
+            } else {
+                parameters.len() + latents.len()
+            };
+            if values.length() as usize != expected {
                 return None;
             }
             let mut packed = vec![0.0; values.length() as usize];
@@ -121,35 +112,79 @@ mod browser {
             if packed.iter().any(|v| !v.is_finite()) {
                 return None;
             }
-            let mut offset = 0;
-            let groups = std::array::from_fn(|i| {
-                let values = packed[offset..offset + group_lengths[i]].to_vec();
-                offset += group_lengths[i];
-                values
-            });
-            let mut gradients = Vec::with_capacity(network.latents.len());
-            for latent in &network.latents {
-                let size = latent.data.len();
-                gradients.push(
-                    Tensor::new(
-                        latent.channels,
-                        latent.height,
-                        latent.width,
-                        packed[offset..offset + size].to_vec(),
-                    )
-                    .ok()?,
-                );
-                offset += size;
-            }
-            Some(ParameterGradient {
-                groups,
-                latents: gradients,
-            })
+            Some((packed, group_lengths))
         })();
-        if gradient.is_none() {
+        if response.is_none() {
             BACKEND.with_borrow_mut(|backend| *backend = None);
         }
-        gradient
+        response
+    }
+    pub fn gradient(
+        network: &Network,
+        target: &Tensor,
+        lambda: f32,
+        mode: Quantizer,
+        temperature: f32,
+        noise: &[f32],
+    ) -> Option<ParameterGradient> {
+        let kind = match mode {
+            Quantizer::None => 0.0,
+            Quantizer::SoftAlone => 1.0,
+            Quantizer::Soft => 2.0,
+            Quantizer::StraightThrough => 3.0,
+            Quantizer::Hard => 4.0,
+        };
+        let normalizer = if matches!(mode, Quantizer::Soft | Quantizer::SoftAlone) {
+            (1.0 / (2.0 * temperature)).tanh()
+        } else {
+            1.0
+        };
+        let (packed, lengths) = request(
+            network,
+            target,
+            [kind, temperature, lambda, normalizer],
+            noise,
+        )?;
+        let mut offset = 0;
+        let groups = std::array::from_fn(|i| {
+            let values = packed[offset..offset + lengths[i]].to_vec();
+            offset += lengths[i];
+            values
+        });
+        let mut gradients = Vec::with_capacity(network.latents.len());
+        for latent in &network.latents {
+            let size = latent.data.len();
+            gradients.push(
+                Tensor::new(
+                    latent.channels,
+                    latent.height,
+                    latent.width,
+                    packed[offset..offset + size].to_vec(),
+                )
+                .ok()?,
+            );
+            offset += size;
+        }
+        Some(ParameterGradient {
+            groups,
+            latents: gradients,
+        })
+    }
+    pub fn evaluation(network: &Network, target: &Tensor, lambda: f32) -> Option<f32> {
+        // Wire mode 5: hard latents and the reference 8-bit image transform.
+        Some(request(network, target, [5.0, 1.0, lambda, 1.0], &[])?.0[0])
+    }
+}
+
+pub fn evaluation(network: &Network, target: &Tensor, lambda: f32) -> Option<f32> {
+    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+    {
+        browser::evaluation(network, target, lambda)
+    }
+    #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
+    {
+        let _ = (network, target, lambda);
+        None
     }
 }
 

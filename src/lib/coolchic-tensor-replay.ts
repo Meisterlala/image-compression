@@ -13,6 +13,8 @@ export class TensorReplay {
   private collecting?: Set<GPUBuffer>;
   private acquire: WebGPUBackend['bufferManager']['acquireBuffer'];
   private release: WebGPUBackend['bufferManager']['releaseBuffer'];
+  // Bind groups retain these buffers: do not recycle intermediates/uniforms
+  // until their recorded plan is released.
   constructor(private backend: WebGPUBackend) {
     const manager = backend.bufferManager;
     this.acquire = manager.acquireBuffer; this.release = manager.releaseBuffer;

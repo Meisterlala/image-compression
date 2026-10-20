@@ -57,19 +57,6 @@ self.onmessage = async ({ data }) => {
           maxError = Math.max(maxError, Math.abs(cpu[i] - gpu[i]));
           if (Math.abs(cpu[i] - gpu[i]) > 3e-5 + Math.abs(cpu[i]) * 1e-3) throw new Error(`Graph gradient mismatch ${i}: GPU ${gpu[i]}, CPU ${cpu[i]}`);
         }
-        if (data.profile) {
-          const tf = await import('@tensorflow/tfjs-core');
-          const profile = await tf.profile(async () => { await graph.gradient(parameters, latents, noise, options); return tf.scalar(0); });
-          const result = profile.result as import('@tensorflow/tfjs-core').Tensor;
-          result.dispose();
-          const totals = new Map<string, { count: number; ms: number }>();
-          for (const kernel of profile.kernels) {
-            const value = totals.get(kernel.name) ?? { count: 0, ms: 0 };
-            value.count++; value.ms += Number(await kernel.kernelTimeMs); totals.set(kernel.name, value);
-          }
-          self.postMessage({ profile: [...totals].sort((a, b) => b[1].ms - a[1].ms), kernels: profile.kernels.length });
-          return;
-        }
         const iterations = data.repeats ?? 3;
         let start = performance.now();
         for (let i = 0; i < iterations; i++) problem.cpuGradient(2, 0.35, 0.001);
@@ -77,7 +64,10 @@ self.onmessage = async ({ data }) => {
         start = performance.now();
         for (let i = 0; i < iterations; i++) await graph.gradient(parameters, latents, noise, options);
         const gpuMs = (performance.now() - start) / iterations;
-        self.postMessage({ cpuMs, gpuMs, speedup: cpuMs / gpuMs, maxError, threads: runtime.threads });
+        const cpuLoss = problem.cpuLoss(0.001), gpuLoss = await graph.evaluate(parameters, latents, Math.fround(0.001));
+        const lossError = Math.abs(cpuLoss-gpuLoss);
+        if (lossError > 3e-6 + Math.abs(cpuLoss)*1e-5) throw new Error(`GPU evaluation loss mismatch: ${gpuLoss} vs ${cpuLoss}`);
+        self.postMessage({ cpuMs, gpuMs, speedup: cpuMs / gpuMs, maxError, cpuLoss, gpuLoss, lossError, threads: runtime.threads });
       } finally { graph.dispose(); problem.free(); }
       return;
     }

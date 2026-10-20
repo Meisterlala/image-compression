@@ -434,16 +434,23 @@ impl Network {
                 *v = (*v * 255.0).round_ties_even() / 255.0;
             }
         }
+        // Accumulate reductions precisely: a serial f32 sum develops visible
+        // size-dependent loss bias on megapixel images. Tensor operations and
+        // the returned loss remain f32, like the reference tensor reductions.
         let mse = image
             .data
             .iter()
             .zip(&target.data)
-            .map(|(a, b)| (a - b).powi(2))
-            .sum::<f32>()
+            .map(|(a, b)| f64::from((a - b).powi(2)))
+            .sum::<f64>() as f32
             / image.data.len() as f32;
         let bits: Vec<_> = rates.iter().map(|r| r.bits.clone()).collect();
-        let rate_bpp =
-            bits.iter().flat_map(|t| &t.data).sum::<f32>() / (arch.height * arch.width) as f32;
+        let rate_bpp = bits
+            .iter()
+            .flat_map(|t| &t.data)
+            .map(|&v| f64::from(v))
+            .sum::<f64>() as f32
+            / (arch.height * arch.width) as f32;
         let evaluation = Evaluation {
             image,
             bits,

@@ -1,7 +1,7 @@
 import type { TensorGraphSpec } from './coolchic-tensor-graph';
 export type GraphCallback = (spec: string, parameters: Float32Array, latents: Float32Array, target: Float32Array,
   noise: Float32Array, common: Float32Array, options: Float32Array) => Float32Array | null;
-export interface GraphAcceleration { gradient: GraphCallback; calls: number; failure?: string; dispose(): void }
+export interface GraphAcceleration { gradient: GraphCallback; calls: number; evaluations: number; failure?: string; dispose(): void }
 export const GRAPH_HEADER = 1024;
 
 /** One bounded worker sleep per complete forward/backward graph. */
@@ -19,7 +19,7 @@ export async function createCoolChicGraphAcceleration(): Promise<GraphAccelerati
   let shared: SharedArrayBuffer | undefined, currentSpec: string | undefined, descriptor: TensorGraphSpec | undefined;
   let disposed = false;
   const backend: GraphAcceleration = {
-    calls: 0,
+    calls: 0, evaluations: 0,
     gradient(spec, parameters, latents, target, noise, common, options) {
       if (disposed || backend.failure) return null;
       try {
@@ -27,9 +27,10 @@ export async function createCoolChicGraphAcceleration(): Promise<GraphAccelerati
       if (fresh) descriptor = JSON.parse(spec) as TensorGraphSpec;
       const expectedParameters = descriptor!.group_lengths.reduce((a,b) => a+b, 0);
       const expectedLatents = descriptor!.latents.reduce((n,l) => n+l.height*l.width, 0);
-      if (parameters.length !== expectedParameters || latents.length !== expectedLatents || noise.length !== expectedLatents || options.length !== 4) throw new Error('GPU graph input length mismatch');
+      const evaluation = options[0] === 5;
+      if (parameters.length !== expectedParameters || latents.length !== expectedLatents || noise.length !== (evaluation ? 0 : expectedLatents) || options.length !== 4) throw new Error('GPU graph input length mismatch');
       const inputLength = parameters.length + latents.length + noise.length + (fresh ? target.length + common.length : 0);
-      const outputLength = parameters.length + latents.length;
+      const outputLength = evaluation ? 1 : parameters.length + latents.length;
       const bytes = GRAPH_HEADER + (inputLength + outputLength) * 4;
       if (!Number.isSafeInteger(bytes) || bytes > 256 * 1024 ** 2) { backend.failure = 'GPU graph transfer exceeds 256 MiB'; return null; }
       if (!shared || shared.byteLength < bytes) shared = new SharedArrayBuffer(bytes);
@@ -45,7 +46,8 @@ export async function createCoolChicGraphAcceleration(): Promise<GraphAccelerati
         backend.failure = length > 0 ? new TextDecoder().decode(new Uint8Array(shared, 32, length).slice()) : 'GPU tensor graph timed out or failed';
         worker.terminate(); return null;
       }
-      currentSpec = spec; backend.calls++;
+      currentSpec = spec;
+      if (evaluation) backend.evaluations++; else backend.calls++;
       return new Float32Array(shared, GRAPH_HEADER + inputLength * 4, outputLength);
       } catch (error) { backend.failure = String(error); worker.terminate(); return null; }
     },

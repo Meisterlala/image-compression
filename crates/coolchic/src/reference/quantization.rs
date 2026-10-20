@@ -105,7 +105,10 @@ impl Search {
         let b = w + 1;
         if let Some(groups) = self.pair(module, self.weight_index, self.bias_index) {
             self.network.set_parameters(&groups)?;
-            let evaluation = self.network.evaluate(target, lambda)?;
+            let evaluation_loss = match super::graph::evaluation(&self.network, target, lambda) {
+                Some(loss) => loss,
+                None => self.network.evaluate(target, lambda)?.loss,
+            };
             let w_step = 2.0_f32.powi(MIN_SHIFT[w] + self.weight_index as i32);
             let b_step = 2.0_f32.powi(MIN_SHIFT[b] + self.bias_index as i32);
             let (w_order, w_bits) = best_order(&groups[w], w_step);
@@ -123,7 +126,7 @@ impl Search {
                 }
             }
             let loss =
-                evaluation.loss + lambda * bits as f32 / (target.width * target.height) as f32;
+                evaluation_loss + lambda * bits as f32 / (target.width * target.height) as f32;
             if loss.is_finite() && loss < self.best_loss {
                 self.best_loss = loss;
                 self.best_pair = Some((self.weight_index, self.bias_index, w_order, b_order));

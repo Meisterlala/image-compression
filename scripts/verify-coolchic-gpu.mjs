@@ -1,6 +1,6 @@
 // Real-browser shader, synchronous WASM bridge, training and portability checks.
 // Requires generated Cool-chic WASM (npm run build:wasm).
-// --require-gpu makes absence a failure; --benchmark also times real WASM steps.
+// --require-gpu makes absence a failure; --benchmark times complete GPU/CPU gradients.
 import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -62,7 +62,7 @@ try {
   const threaded = await runWorker({ type: 'train', threads: 4, width: 256, height: 256 });
   assert.equal(threaded.threads, 4); verifyStream(threaded, 256, 256);
   console.log('PASS: actual parallel WASM training emits a portable native-decodable stream');
-  const noGpu = await runWorker({ type: 'loader', gpu: true, unavailable: true });
+  const noGpu = await runWorker({ type: 'loader', gpu: true, unavailable: true, width: 128, height: 128 });
   verifyStream(noGpu);
   assert(noGpu.notices.some(n => n.includes('WebGPU training unavailable')));
   console.log('PASS: missing WebGPU falls back with isolation still enabled');
@@ -129,11 +129,9 @@ try {
     assert(trained.calls > 0); assert(!trained.failure); verifyStream(trained);
     console.log(`PASS: GPU/WASM-trained stream independently decoded by native Rust (${trained.calls} GPU jobs, ${Math.round(trained.ms)} ms)`);
     if (process.argv.includes('--benchmark')) {
-      const automatic = await page.evaluate(() => Math.min(16, Math.max(1, navigator.hardwareConcurrency > 2 ? navigator.hardwareConcurrency - 1 : navigator.hardwareConcurrency)));
-      for (const width of [128, 384, 512]) {
-        const results = [];
-        for (const [gpu, threads] of [[false,false], [true,false], [false,4], [false,8], [false,automatic], [true,automatic]]) results.push(await runWorker({ type: 'train', gpu, threads, calibrate: true, threshold: 8_000_000, width, height: width, steps: 10 }));
-        console.log(JSON.stringify({ benchmark: `${width}x${width}, init + 10 real WASM training steps`, cpu: results[0], gpu: results[1], threads4: results[2], threads8: results[3], automaticThreads: results[4], gpuAutomatic: results[5] }));
+      for (const width of [256,512,1024]) {
+        const result = await runWorker({type:'graph-benchmark',width,height:width,threads:true,repeats:5});
+        console.log(JSON.stringify({benchmark:`${width}x${width}, warmed complete gradients vs automatic CPU`,...result}));
       }
     }
   } else console.log('SKIP: WebGPU parity (no adapter); fallback checks still run');
@@ -146,7 +144,7 @@ try {
   });
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
   assert.equal(await page.evaluate(() => crossOriginIsolated), false);
-  const fallback = await runWorker({ type: 'loader', gpu: true });
+  const fallback = await runWorker({ type: 'loader', gpu: true, width: 128, height: 128 });
   verifyStream(fallback);
   assert(fallback.notices.some(n => n.includes('WebGPU training unavailable')));
   console.log('PASS: default-on GPU falls back to portable CPU WASM without isolation');

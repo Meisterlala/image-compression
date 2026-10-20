@@ -5,7 +5,7 @@ import '@tensorflow/tfjs-backend-webgpu';
 import type { WebGPUBackend } from '@tensorflow/tfjs-backend-webgpu';
 import { addN as gpuAddN } from '@tensorflow/tfjs-backend-webgpu/dist/kernels/AddN';
 import { TensorReplay, CapturedTensorGradient, type GraphInputBuffer } from './coolchic-tensor-replay';
-import { registerFusedCoolChicKernels, fusedQuantize, fusedRate, fusedContext, fusedFilter, fusedConvolution } from './coolchic-tensor-fused';
+import { registerFusedCoolChicKernels, fusedClippedMse, fusedImageQuant, fusedExpand, fusedQuantize, fusedRate, fusedContext, fusedFilter, fusedConvolution } from './coolchic-tensor-fused';
 
 export interface GraphArchitecture {
   height: number; width: number; latent_min: number; latent_max: number;
@@ -78,6 +78,7 @@ export class CoolChicTensorGraph {
   private recorder!: TensorReplay;
   private plan?: { key: string; graph: CapturedTensorGradient };
   private running = false;
+  private disposed = false;
   private target: T4;
   private common?: T4;
   private arm: Arm;
@@ -163,7 +164,7 @@ export class CoolChicTensorGraph {
   private crop(x: T4, h: number, w: number) { return x.slice([0, 0, 0, 0], [1, h, w, x.shape[3]]) as T4; }
   private expand(x: T4, h: number, w: number, identity: boolean) {
     if (identity && x.shape[1] === h && x.shape[2] === w) return x;
-    return this.crop(tf.image.resizeNearestNeighbor(x, [x.shape[1] * 2, x.shape[2] * 2], false), h, w);
+    return fusedExpand(x, h, w);
   }
   private filter(x: T4, p: Parameter, kernel: number, up: boolean): T4 {
     return fusedFilter(x, this.parameter(p), kernel, up);
@@ -204,7 +205,7 @@ export class CoolChicTensorGraph {
   private rate(x: T4, raw: T4): T4 {
     return fusedRate(x, raw);
   }
-  private forward(noise: Float32Array, options: GraphOptions) {
+  private forward(options: GraphOptions, evaluation = false) {
     const a = this.spec.architecture;
     const quantized = this.latentVars.map((variable, i) => this.quantize(variable as T4, this.noiseVars[i] as T4, options));
     const rates = quantized.map((latent, index) => {
@@ -235,35 +236,39 @@ export class CoolChicTensorGraph {
     for (const layer of this.trunk) native = this.convolution(native, layer);
     if (this.stabiliser) native = native.add(this.convolution(input.slice([0, 0, 0, 0], [-1, -1, -1, this.stabiliser.ci]) as T4, this.stabiliser)) as T4;
     const raw = this.resize(this.convolution(native, this.output), a.height, a.width, a.interpolation);
-    const clip = tf.customGrad<T4>((...args) => {
-      const x = args[0] as T4, save = args[1] as tf.GradSaveFunc;
-      save([x.greater(0).logicalAnd(x.less(1)).cast('float32')]);
-      return { value: x.clipByValue(0, 1) as T4, gradFunc: (dy: T4, saved: tf.Tensor[]) => dy.mul(saved[0]) as T4 };
-    });
-    const image = clip(raw), mse = image.sub(this.target).square().mean();
+    const image = evaluation ? fusedImageQuant(raw) : raw.clipByValue(0,1) as T4;
+    const mse = evaluation ? image.sub(this.target).square().mean() : fusedClippedMse(raw,this.target,image);
     const rate = tf.addN(rates.map(r => r.sum())).div(a.height * a.width);
     return { image, rates, mse, rate, loss: mse.add(rate.mul(options.lambda)) as tf.Scalar };
   }
   async gradient(parameters: Float32Array, latents: Float32Array, noise: Float32Array, options: GraphOptions, debug = false): Promise<Float32Array> {
+    return this.execute(parameters, latents, noise, options, debug, false);
+  }
+  async evaluate(parameters: Float32Array, latents: Float32Array, lambda: number): Promise<number> {
+    return (await this.execute(parameters, latents, new Float32Array(0), { mode: 4, temperature: 1, normalizer: 1, lambda }, false, true))[0];
+  }
+  private async execute(parameters: Float32Array, latents: Float32Array, noise: Float32Array, options: GraphOptions, debug: boolean, evaluation: boolean): Promise<Float32Array> {
     if (gpuFailure) throw new Error(gpuFailure);
+    if (this.disposed) throw new Error('GPU tensor graph is disposed');
     if (this.running) throw new Error('Concurrent GPU gradient calls are not supported');
     this.running = true;
     const device = (tf.backend() as WebGPUBackend).device;
     device.pushErrorScope('validation');
     try {
-      const result = await this.computeGradient(parameters, latents, noise, options, debug);
-      if (!result.every(Number.isFinite)) throw new Error('Non-finite GPU graph gradient');
+      const result = await this.computeGradient(parameters, latents, noise, options, debug, evaluation);
+      for (let i=0;i<result.length;i++) if (!Number.isFinite(result[i])) throw new Error('Non-finite GPU graph gradient');
       return result;
     } finally {
-      this.running = false;
-      const error = await device.popErrorScope();
-      if (error) throw new Error(error.message);
-      if (gpuFailure) throw new Error(gpuFailure);
+      try {
+        const error = await device.popErrorScope();
+        if (error) throw new Error(error.message);
+        if (gpuFailure) throw new Error(gpuFailure);
+      } finally { this.running = false; }
     }
   }
-  private async computeGradient(parameters: Float32Array, latents: Float32Array, noise: Float32Array, options: GraphOptions, debug: boolean): Promise<Float32Array> {
-    if (parameters.length !== this.parameterCount || latents.length !== this.latentCount || noise.length !== this.latentCount) throw new Error('Tensor graph payload length mismatch');
-    const key = JSON.stringify([options.mode, options.temperature, options.normalizer, options.lambda]);
+  private async computeGradient(parameters: Float32Array, latents: Float32Array, noise: Float32Array, options: GraphOptions, debug: boolean, evaluation: boolean): Promise<Float32Array> {
+    if (parameters.length !== this.parameterCount || latents.length !== this.latentCount || noise.length !== (evaluation ? 0 : this.latentCount)) throw new Error('Tensor graph payload length mismatch');
+    const key = JSON.stringify([evaluation, options.mode, options.temperature, options.normalizer, options.lambda]);
     if (!debug && this.plan?.key === key) return this.plan.graph.run(parameters, latents, noise);
     if (!debug) { this.plan?.graph.dispose(); this.plan = undefined; }
     tf.tidy(() => {
@@ -273,17 +278,18 @@ export class CoolChicTensorGraph {
       for (let i = 0; i < this.latentVars.length; i++) {
         const variable = this.latentVars[i], n = variable.size;
         variable.assign(tf.tensor(new Float32Array(latents.subarray(offset, offset + n)), variable.shape));
-        this.noiseVars[i].assign(tf.tensor(new Float32Array(noise.subarray(offset, offset + n)), variable.shape));
+        if (!evaluation) this.noiseVars[i].assign(tf.tensor(new Float32Array(noise.subarray(offset, offset + n)), variable.shape));
         offset += n;
       }
     });
     this.debugParameterGradients = debug;
     const build = () => tf.tidy(() => {
+      if (evaluation) return this.forward(options, true).loss.reshape([1]) as tf.Tensor1D;
       const trainable = [...this.refs.filter(p => debug ? p.group !== 5 : p.trainable).map(p => this.parameter(p)), ...this.latentVars];
-      const { grads } = tf.variableGrads(() => this.forward(noise, options).loss, trainable);
+      const { grads } = tf.variableGrads(() => this.forward(options).loss, trainable);
       const tensors = [...this.refs.map(p => grads[this.parameter(p).name]?.reshape([-1]) ?? tf.zeros([p.length])), ...this.latentVars.map(v => grads[v.name].reshape([-1]))];
       if (debug) {
-        const result = this.forward(noise, options);
+        const result = this.forward(options);
         tensors.unshift(result.loss.reshape([1]), result.mse.reshape([1]), result.rate.reshape([1]), result.image.transpose([0, 3, 1, 2]).reshape([-1]), ...result.rates.map(r => r.reshape([-1])));
       }
       return tf.concat(tensors) as tf.Tensor1D;
@@ -302,7 +308,9 @@ export class CoolChicTensorGraph {
       for (const p of this.refs) prepare(this.parameter(p), 'parameters', offsets[p.group] + p.offset);
       let offset = 0;
       for (let i = 0; i < this.latentVars.length; i++) {
-        prepare(this.latentVars[i], 'latents', offset); prepare(this.noiseVars[i], 'noise', offset); offset += this.latentVars[i].size;
+        prepare(this.latentVars[i], 'latents', offset);
+        if (!evaluation) prepare(this.noiseVars[i], 'noise', offset);
+        offset += this.latentVars[i].size;
       }
       const capture = this.recorder.capture(build);
       packed = capture.value;
@@ -311,11 +319,12 @@ export class CoolChicTensorGraph {
     }
     try {
       const result = await packed.data() as Float32Array;
-      if ((tf.backend() as WebGPUBackend).memory().numBytesAllocatedInGPU > 1536 * 1024 ** 2) throw new Error('Tensor graph exceeded GPU memory budget');
+      if ((tf.backend() as WebGPUBackend).memory().numBytesAllocatedInGPU > 3 * 1024 ** 3) throw new Error('Tensor graph exceeded GPU memory budget');
       return result;
     } finally { packed.dispose(); }
   }
   dispose() {
+    if(this.disposed) return; this.disposed = true;
     for (const variable of this.vars.values()) variable.dispose(); this.vars.clear();
     this.latentVars?.forEach(v => v.dispose()); this.noiseVars?.forEach(v => v.dispose()); this.target?.dispose(); this.common?.dispose();
     for (const tensor of this.constants.values()) tensor.dispose(); this.constants.clear();

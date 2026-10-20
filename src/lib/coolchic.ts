@@ -64,7 +64,7 @@ export async function loadCoolChic(settings: Settings, progress: (text: string, 
         setCoolChicGraphAccelerator(undefined);
         encoder?.free();
         if (acceleration?.failure) notices.push(`WebGPU training fell back to CPU WASM: ${acceleration.failure}`);
-        if (acceleration?.calls) notices.push(`WebGPU tensor graph: ${acceleration.calls} complete forward/backward iterations. Reference SOAP, RD search and portable decoding use WASM.`);
+        if (acceleration?.calls) notices.push(`WebGPU tensor graph: ${acceleration.calls} complete forward/backward iterations, ${acceleration.evaluations} full RD evaluations. Reference SOAP, greedy search decisions and portable decoding use WASM.`);
         else if (settings.coolchicGpu === false) notices.push('WebGPU training disabled.');
         else if (image.width * image.height < 16384) notices.push('Small image: CPU SIMD avoids GPU graph startup overhead.');
         acceleration?.dispose();
