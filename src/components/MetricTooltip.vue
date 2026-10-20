@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, useId, type CSSProperties } from 'vue';
 
-withDefaults(defineProps<{ label: string; text: string; direction?: 'higher' | 'lower'; infoIcon?: boolean }>(), { infoIcon: true });
+withDefaults(defineProps<{ label: string; text: string; direction?: 'higher' | 'lower'; infoIcon?: boolean; asChild?: boolean }>(), { infoIcon: true, asChild: false });
 const id = useId();
 const visible = ref(false);
-const trigger = ref<HTMLButtonElement>();
+const trigger = ref<HTMLElement>();
 const popup = ref<HTMLSpanElement>();
 const position = ref<CSSProperties>({ visibility: 'hidden' });
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -59,9 +59,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <span class="metric-help" @mouseenter="show" @mouseleave="leave">
+  <span ref="trigger" class="metric-help" @mouseenter="show" @mouseleave="leave">
+    <slot v-if="asChild" v-bind="{ tooltipId: id, showTooltip: show, hideTooltip: hide }" />
     <button
-      ref="trigger"
+      v-else
+      class="tooltip-trigger"
       :class="{ 'metric-value': !infoIcon }"
       type="button"
       :aria-label="`About ${label}`"
@@ -88,7 +90,7 @@ onBeforeUnmount(() => {
   display: inline-block;
 }
 
-button {
+.tooltip-trigger {
   padding: 2px 0;
   border: 0;
   border-bottom: 1px dotted var(--muted);
@@ -98,7 +100,7 @@ button {
   cursor: help;
 }
 
-button.metric-value {
+.tooltip-trigger.metric-value {
   color: inherit;
   border-bottom-color: currentColor;
 }
@@ -129,7 +131,7 @@ button.metric-value {
   font-size: 12px;
   font-weight: 400;
   line-height: 1.6;
-  white-space: normal;
+  white-space: pre-line;
 }
 
 </style>

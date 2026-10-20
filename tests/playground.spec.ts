@@ -23,16 +23,30 @@ function pane(page: Page, format: string) {
   return page.locator(`[data-codec="${format}"]`);
 }
 
-function modelGroup(page: Page, point?: string) {
-  return pane(page, 'jpegai').locator(point ? `.model-group[data-operating-point="${point}"]` : '.model-group.current');
+function modelCell(page: Page, point: string, id: number | string) {
+  return pane(page, 'jpegai').locator(`.model-cell[data-operating-point="${point}"][data-model="${id}"]`);
+}
+
+function modelHeader(page: Page, point: string) {
+  return pane(page, 'jpegai').locator(`.model-control thead [data-operating-point="${point}"]`);
 }
 
 function pointOption(page: Page, point: string) {
-  return pane(page, 'jpegai').getByRole('radiogroup', { name: 'Operating point', exact: true }).locator(`input[value="${point}"]`);
+  return pane(page, 'jpegai').locator(`.point-select[data-operating-point="${point}"]`);
 }
 
 async function choosePoint(page: Page, point: string) {
-  await pointOption(page, point).locator('..').click();
+  const panel = pane(page, 'jpegai');
+  if (await panel.getByLabel('Model selection', { exact: true }).inputValue() === 'target') {
+    await pointOption(page, point).click();
+  } else {
+    const id = Number(await panel.locator('.model-control').getAttribute('data-selected-model'));
+    await chooseModel(page, point, id);
+  }
+}
+
+async function chooseModel(page: Page, point: string, id: number) {
+  await modelCell(page, point, id).locator('.model-select').click({ position: { x: 5, y: 5 } });
 }
 
 function resultRow(page: Page, format: string) {
@@ -47,13 +61,15 @@ async function settings(page: Page, format: string) {
 async function downloadModels(page: Page) {
   const panel = pane(page, 'jpegai');
   const target = await panel.getByLabel('Model selection', { exact: true }).inputValue() === 'target';
-  const cards = modelGroup(page).locator(target ? '.model-card' : '.model-card.selected');
-  await expect(cards).toHaveCount(target ? 4 : 1);
-  for (const card of await cards.all()) {
-    await expect(card.locator('.model-select')).toBeEnabled();
-    if (await card.getAttribute('data-ready') !== 'true') {
-      await card.getByRole('button', { name: 'Download', exact: true }).click();
-      await expect(card).toHaveAttribute('data-ready', 'true', { timeout: 60_000 });
+  const rows = panel.locator(target ? '.model-control tbody tr' : '.model-control tbody tr.selected');
+  await expect(rows).toHaveCount(target ? 4 : 1);
+  const point = (await panel.locator('.model-control').getAttribute('data-operating-point'))!;
+  for (const row of await rows.all()) {
+    const cell = modelCell(page, point, (await row.getAttribute('data-model'))!);
+    await expect(cell.locator('.model-select')).toBeEnabled();
+    if (await cell.getAttribute('data-ready') !== 'true') {
+      await cell.getByRole('button', { name: 'Download', exact: true }).click();
+      await expect(cell).toHaveAttribute('data-ready', 'true', { timeout: 60_000 });
     }
   }
 }
@@ -77,7 +93,7 @@ test('codec tabs retain five real WASM outputs with one visible panel', async ({
   await expect(page.locator('.codec-pane:visible')).toHaveCount(1);
   await expect(page.locator('aside, dialog')).toHaveCount(0);
   await expect(page.getByRole('table', { name: 'Image format comparison', exact: true })).toBeVisible();
-  await expect(page.locator('tbody tr')).toHaveCount(6);
+  await expect(page.locator('.comparison-card tbody tr')).toHaveCount(6);
   for (const format of ['jpegai', 'jpeg', 'avif', 'jxl', 'coolchic']) {
     await expect(resultRow(page, format).locator('td')).toHaveText(Array(6).fill(''));
   }
@@ -142,36 +158,45 @@ test('codec tabs retain five real WASM outputs with one visible panel', async ({
   expect(requests.every(url => new URL(url).hostname === 'localhost' || url.startsWith('blob:'))).toBeTruthy();
 });
 
-test('four compact model cards select and download into cache without file exports', async ({ page }) => {
+test('compact model table separates selection, download and removal without status dots', async ({ page }) => {
   let fileDownloads = 0, weightRequests = 0;
   page.on('download', () => fileDownloads++);
   page.on('request', request => { if (request.url().includes('.zjb')) weightRequests++; });
   await page.goto('/'); await upload(page);
   const models = pane(page, 'jpegai').getByRole('group', { name: 'JPEG AI models', exact: true });
-  await expect(models.locator('.model-group')).toHaveCount(3);
-  await expect(models.locator('.model-card')).toHaveCount(12);
-  const current = modelGroup(page);
-  const card = current.locator('[data-model="0"]');
-  await expect(current.locator('.model-size')).toHaveText(Array(4).fill('25.9 MiB'));
-  await expect(modelGroup(page, 'sop').locator('.model-size')).toHaveText(Array(4).fill('24.8 MiB'));
-  await expect(modelGroup(page, 'hop').locator('.model-size')).toHaveText(Array(4).fill('54.4 MiB'));
-  await card.locator('.model-select').click();
+  await expect(models.locator('tbody tr')).toHaveCount(4);
+  await expect(models.locator('.model-cell')).toHaveCount(12);
+  await expect(models.locator('.ready-dot, .info-icon')).toHaveCount(0);
+  await expect(models.locator('.stored-size')).toHaveText('Stored models use 0 B');
+  const card = modelCell(page, 'bop', 0);
+  await expect(modelHeader(page, 'bop').locator('.model-size')).toHaveText('25.9 MiB each');
+  await expect(modelHeader(page, 'sop').locator('.model-size')).toHaveText('24.8 MiB each');
+  await expect(modelHeader(page, 'hop').locator('.model-size')).toHaveText('54.4 MiB each');
+  await chooseModel(page, 'bop', 0);
   await expect(card).toHaveAttribute('data-ready', 'false');
   expect(weightRequests).toBe(0);
   await expect(pane(page, 'jpegai').getByRole('button', { name: 'Encode', exact: true })).toBeDisabled();
+  const downloadBackground = await card.getByRole('button', { name: 'Download', exact: true }).evaluate(button => getComputedStyle(button).backgroundColor);
   await card.getByRole('button', { name: 'Download', exact: true }).click();
   await expect(card).toHaveAttribute('data-ready', 'true', { timeout: 60_000 });
-  await expect(card.locator('.model-select')).toHaveAttribute('aria-pressed', 'true');
-  await card.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(models.locator('.stored-size')).toHaveText('Stored models use 25.9 MiB');
+  await expect(modelCell(page, 'bop', 0).locator('.model-select')).toHaveAttribute('aria-pressed', 'true');
+  const remove = card.getByRole('button', { name: 'Remove', exact: true });
+  await expect(remove).toHaveClass(/remove/);
+  expect(await remove.evaluate(button => getComputedStyle(button).backgroundColor)).not.toBe(downloadBackground);
+  const [red, green] = (await remove.evaluate(button => getComputedStyle(button).color)).match(/\d+/g)!.map(Number);
+  expect(red!).toBeGreaterThan(green!);
+  await remove.click();
   await expect(card).toHaveAttribute('data-ready', 'false');
+  await expect(models.locator('.stored-size')).toHaveText('Stored models use 0 B');
   await card.getByRole('button', { name: 'Download', exact: true }).click();
   await expect(card).toHaveAttribute('data-ready', 'true');
-  await current.locator('[data-model="1"] .model-select').click();
-  await expect(current.locator('[data-model="1"]')).toHaveAttribute('data-ready', 'false');
+  await chooseModel(page, 'bop', 1);
+  await expect(modelCell(page, 'bop', 1)).toHaveAttribute('data-ready', 'false');
   expect(weightRequests).toBe(2); // Only the two explicit Download clicks above.
   await expect(pane(page, 'jpegai').getByRole('button', { name: 'Encode', exact: true })).toBeDisabled();
-  await card.locator('.model-select').click();
-  await expect(card.locator('.model-select')).toHaveAttribute('aria-pressed', 'true');
+  await chooseModel(page, 'bop', 0);
+  await expect(modelCell(page, 'bop', 0).locator('.model-select')).toHaveAttribute('aria-pressed', 'true');
   expect(fileDownloads).toBe(0);
   await expect(page.locator('details, dialog')).toHaveCount(0);
   await expect(models.locator('select')).toHaveCount(0);
@@ -184,23 +209,23 @@ test('four compact model cards select and download into cache without file expor
 test('SOP/BOP/HOP selector explains the trade-off and uses real independent models and cache entries', async ({ page }) => {
   await page.goto('/'); await upload(page);
   const panel = pane(page, 'jpegai');
-  const help = panel.getByRole('button', { name: 'About Operating point', exact: true });
-  await expect(pointOption(page, 'bop')).toBeChecked();
-  await expect(panel.getByRole('radiogroup', { name: 'Operating point' }).getByRole('radio')).toHaveCount(3);
-  await help.hover();
-  await expect(page.getByRole('tooltip')).toContainText('Simple Operation Point');
-  await expect(page.getByRole('tooltip')).toContainText('resource-constrained');
-  await expect(page.getByRole('tooltip')).toContainText('Base Operation Point');
-  await expect(page.getByRole('tooltip')).toContainText('High Operation Point');
-  await expect(page.getByRole('tooltip')).toContainText('slower decoding');
+  const help = pointOption(page, 'hop');
+  await expect(pointOption(page, 'bop')).toHaveAttribute('aria-pressed', 'true');
+  await expect(panel.locator('.point-select')).toHaveCount(3);
+  for (const [name, explanation] of [['Simple Operation Point', 'resource-constrained'], ['Base Operation Point', 'general-purpose'], ['High Operation Point', 'slower decoding']]) {
+    await panel.getByRole('button', { name: `Use ${name}`, exact: true }).hover();
+    await expect(page.getByRole('tooltip')).toContainText(explanation!);
+    await expect(page.getByRole('tooltip')).not.toContainText(/Download|fetches|weights/);
+    await page.keyboard.press('Escape');
+  }
   await page.keyboard.press('Escape');
   await run(page, 'jpegai');
   await expect(resultRow(page, 'jpegai')).toHaveAttribute('data-operating-point', 'bop');
   const bop = await page.getByLabel('Right JPEG AI image', { exact: true }).evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL());
   await choosePoint(page, 'hop');
   await expect(panel.locator('.model-control')).toHaveAttribute('data-operating-point', 'hop');
-  await expect(modelGroup(page).locator('[data-model="1"]')).toHaveAttribute('data-ready', 'false');
-  await expect(modelGroup(page).locator('.model-size')).toHaveText(Array(4).fill('54.4 MiB'));
+  await expect(modelCell(page, 'hop', 1)).toHaveAttribute('data-ready', 'false');
+  await expect(modelHeader(page, 'hop').locator('.model-size')).toHaveText('54.4 MiB each');
   await expect(panel.locator('.changed-note')).toBeVisible();
   await expect(resultRow(page, 'jpegai')).toHaveAttribute('data-operating-point', 'bop');
   await run(page, 'jpegai');
@@ -209,7 +234,7 @@ test('SOP/BOP/HOP selector explains the trade-off and uses real independent mode
   const hop = await page.getByLabel('Right JPEG AI image', { exact: true }).evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL());
   expect(hop).not.toBe(bop);
   await choosePoint(page, 'bop');
-  await expect(modelGroup(page).locator('[data-model="1"]')).toHaveAttribute('data-ready', 'true');
+  await expect(modelCell(page, 'bop', 1)).toHaveAttribute('data-ready', 'true');
   await expect(resultRow(page, 'jpegai')).toHaveAttribute('data-operating-point', 'hop');
   const download = page.waitForEvent('download');
   await panel.getByRole('button', { name: 'Download JPEG AI', exact: true }).click();
@@ -218,7 +243,7 @@ test('SOP/BOP/HOP selector explains the trade-off and uses real independent mode
   await run(page, 'jpegai'); // BOP cache is intact after HOP use.
   expect(await page.getByLabel('Right JPEG AI image', { exact: true }).evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL())).toBe(bop);
   await choosePoint(page, 'hop');
-  await expect(modelGroup(page).locator('[data-model="1"]')).toHaveAttribute('data-ready', 'true');
+  await expect(modelCell(page, 'hop', 1)).toHaveAttribute('data-ready', 'true');
   await run(page, 'jpegai'); // HOP cache is also independent and reusable.
   expect(await page.getByLabel('Right JPEG AI image', { exact: true }).evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL())).toBe(hop);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -230,47 +255,49 @@ test('SOP/BOP/HOP selector explains the trade-off and uses real independent mode
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
 
-test('operating-point segments and labels align in both themes and responsive layouts', async ({ page }) => {
+test('matrix selection is persistent and distinguishes a model from an automatic family', async ({ page }) => {
   await page.goto('/');
+  const panel = pane(page, 'jpegai');
+  const mode = panel.getByLabel('Model selection', { exact: true });
+  await expect(panel.locator('.point-options')).toHaveCount(0);
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
-    for (const width of [1440, 900]) {
+    for (const width of [1440, 900, 390]) {
       await page.setViewportSize({ width, height: 1000 });
       for (const point of ['sop', 'bop', 'hop']) {
-        await choosePoint(page, point);
-        const boxes = await pane(page, 'jpegai').evaluate(panel => {
-          const point = panel.querySelector('.point-options')!;
-          const mode = panel.querySelector('#jpegai-rate-mode')!;
-          return {
-            point: point.getBoundingClientRect().toJSON(), mode: mode.getBoundingClientRect().toJSON(),
-            pointLabel: point.closest('.field')!.querySelector('.field-heading')!.getBoundingClientRect().toJSON(),
-            modeLabel: mode.closest('.field')!.querySelector('label')!.getBoundingClientRect().toJSON(),
-          };
-        });
-        expect(Math.abs(boxes.point.y - boxes.mode.y)).toBeLessThan(0.5);
-        expect(Math.abs(boxes.point.height - boxes.mode.height)).toBeLessThan(0.5);
-        expect(Math.abs(boxes.pointLabel.y - boxes.modeLabel.y)).toBeLessThan(0.5);
-        expect(Math.abs(boxes.pointLabel.height - boxes.modeLabel.height)).toBeLessThan(0.5);
+        await chooseModel(page, point, 2);
+        await expect(modelCell(page, point, 2)).toHaveClass(/active/);
+        await expect(panel.locator('.model-cell.active')).toHaveCount(1);
+        await expect(modelCell(page, point, 2).locator('.selected-label')).toHaveText('✓ Selected');
+        await expect(panel.locator('.selection-summary')).toContainText('Model 3');
+        await expect(pointOption(page, point)).toHaveAttribute('aria-pressed', 'true');
+        await panel.locator('thead th').first().click(); // Losing focus must not erase selection.
+        await expect(modelCell(page, point, 2)).toHaveClass(/active/);
       }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
     }
-    await page.setViewportSize({ width: 390, height: 844 });
-    const point = await pane(page, 'jpegai').getByRole('radiogroup', { name: 'Operating point' }).boundingBox();
-    const mode = await pane(page, 'jpegai').getByLabel('Model selection', { exact: true }).boundingBox();
-    expect(mode!.y).toBeGreaterThan(point!.y + point!.height);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-    await choosePoint(page, 'bop');
-    await pointOption(page, 'bop').focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(pointOption(page, 'hop')).toBeChecked();
   }
+  await pointOption(page, 'hop').click(); // A family heading directly chooses automatic selection.
+  await expect(mode).toHaveValue('target');
+  await expect(panel.locator('.model-cell.automatic')).toHaveCount(4);
+  await expect(panel.locator('.model-cell.active')).toHaveCount(0);
+  await expect(panel.locator('.selection-summary')).toContainText('High Operation Point · Automatic model selection');
+  await choosePoint(page, 'sop');
+  await expect(mode).toHaveValue('target');
+  await expect(modelHeader(page, 'sop').locator('.automatic-label')).toHaveText('Automatic');
+  await modelCell(page, 'bop', 0).locator('.model-select').focus();
+  await page.keyboard.press('Space');
+  await expect(mode).toHaveValue('model');
+  await expect(modelCell(page, 'bop', 0)).toHaveClass(/active/);
+  await expect(panel.locator('.selection-summary')).toContainText('Base Operation Point · Model 1');
 });
 
 test('SOP encodes with its own decoder and supports target search without implicit downloads', async ({ page }) => {
   let weights = 0;
   page.on('request', request => { if (request.url().includes('.zjb')) weights++; });
   await page.goto('/'); await upload(page);
-  await modelGroup(page, 'sop').locator('[data-model="1"] .model-select').click();
-  await expect(pointOption(page, 'sop')).toBeChecked();
+  await chooseModel(page, 'sop', 1);
+  await expect(pointOption(page, 'sop')).toHaveAttribute('aria-pressed', 'true');
   await expect(pane(page, 'jpegai').getByRole('button', { name: 'Encode', exact: true })).toBeDisabled();
   expect(weights).toBe(0);
   await run(page, 'jpegai');
@@ -287,20 +314,19 @@ test('SOP encodes with its own decoder and supports target search without implic
   expect(weights).toBe(5); // Four SOP bundles + the one explicitly downloaded BOP bundle.
 });
 
-test('desktop shows twelve compact cards while mobile shows the selected group', async ({ page }) => {
+test('model matrix exposes every selectable box on desktop and mobile', async ({ page }) => {
   await page.goto('/');
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await expect(pane(page, 'jpegai').locator('.model-card:visible')).toHaveCount(12);
-  const cards = await pane(page, 'jpegai').locator('.model-card').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().toJSON()));
-  expect(cards.every(card => card.height < 80)).toBeTruthy();
-  expect(cards[0]!.y).toBe(cards[3]!.y);
-  expect(cards[4]!.y).toBeGreaterThan(cards[0]!.y + cards[0]!.height);
-  expect(cards[8]!.y).toBeGreaterThan(cards[4]!.y + cards[4]!.height);
+  const table = pane(page, 'jpegai').getByRole('table', { name: 'JPEG AI model downloads' });
+  await expect(table.locator('.model-cell:visible')).toHaveCount(12);
+  await expect(table.locator('.model-name')).toHaveCount(4);
+  expect((await table.boundingBox())!.height).toBeLessThan(370);
   await page.setViewportSize({ width: 390, height: 844 });
   for (const point of ['sop', 'bop', 'hop']) {
     await choosePoint(page, point);
-    await expect(pane(page, 'jpegai').locator('.model-card:visible')).toHaveCount(4);
-    await expect(modelGroup(page, point)).toBeVisible();
+    await expect(table.locator('.model-cell:visible')).toHaveCount(12);
+    await expect(modelCell(page, point, 0)).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   }
 });
 
@@ -313,7 +339,7 @@ test('evicted models stop encoding without any automatic network download', asyn
   await expect(pane(page, 'jpegai')).toHaveAttribute('data-phase', 'error');
   await expect(pane(page, 'jpegai').getByRole('alert')).toContainText('Download BOP model');
   expect(weights).toBe(0);
-  await expect(modelGroup(page).locator('[data-model="1"]')).toHaveAttribute('data-ready', 'false');
+  await expect(modelCell(page, 'bop', 1)).toHaveAttribute('data-ready', 'false');
   await expect(pane(page, 'jpegai').getByRole('button', { name: 'Encode', exact: true })).toBeDisabled();
 });
 
@@ -336,11 +362,11 @@ test('an explicit download remains cancellable when changing operating point', a
   await page.route('**/models/bop-m0.zjb*', async route => { await pending; await route.abort().catch(() => {}); });
   await page.goto('/'); await upload(page);
   const request = page.waitForRequest('**/models/bop-m0.zjb*');
-  await modelGroup(page).locator('[data-model="0"]').getByRole('button', { name: 'Download', exact: true }).click();
+  await modelCell(page, 'bop', 0).getByRole('button', { name: 'Download', exact: true }).click();
   await request;
   await choosePoint(page, 'hop');
   await expect(pane(page, 'jpegai').locator('.model-control')).toHaveAttribute('data-operating-point', 'hop');
-  await modelGroup(page, 'bop').getByRole('button', { name: /^Cancel/ }).click();
+  await modelCell(page, 'bop', 0).getByRole('button', { name: /^Cancel/ }).click();
   release();
   await downloadModels(page);
   await expect(pane(page, 'jpegai').getByRole('button', { name: 'Encode', exact: true })).toBeEnabled();

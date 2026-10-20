@@ -23,6 +23,9 @@ const changed = computed(() => !!props.result && (
   props.source?.width !== props.result.width || props.source?.height !== props.result.height ||
   JSON.stringify(settings.value) !== JSON.stringify(props.result.settings)
 ));
+function selectPoint(operatingPoint: OperatingPoint) {
+  settings.value = { ...settings.value, operatingPoint, rateMode: 'target' };
+}
 function selectModel(operatingPoint: OperatingPoint, id: number) {
   settings.value = { ...settings.value, operatingPoint, model: id, rateMode: 'model' };
 }
@@ -43,6 +46,7 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
         :disabled="working || importing"
         :refresh-key="status.phase"
         @use="selectModel"
+        @point="selectPoint"
         @busy="modelBusy = $event"
         @ready="modelsReady = $event"
       />

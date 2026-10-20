@@ -1,8 +1,8 @@
 export type OperatingPoint = 'sop' | 'bop' | 'hop';
-export const operatingPoints: { id: OperatingPoint; label: string }[] = [
-  { id: 'sop', label: 'Simple Operation Point' },
-  { id: 'bop', label: 'Base Operation Point' },
-  { id: 'hop', label: 'High Operation Point' },
+export const operatingPoints: { id: OperatingPoint; label: string; description: string }[] = [
+  { id: 'sop', label: 'Simple Operation Point', description: 'Simple Operation Point (SOP): Fast previews and resource-constrained devices. Lightest decoder; reconstruction quality can be lower.' },
+  { id: 'bop', label: 'Base Operation Point', description: 'Base Operation Point (BOP): Balanced default for general-purpose use.' },
+  { id: 'hop', label: 'High Operation Point', description: 'High Operation Point (HOP): Compression-priority work; slower decoding and higher memory. Smaller files are not guaranteed.' },
 ];
 export type Format = 'jpegai' | 'jpeg' | 'avif' | 'jxl' | 'coolchic';
 export const formats: { id: Format; label: string; extension: string; mime: string; description: string }[] = [

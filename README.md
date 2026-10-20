@@ -67,21 +67,26 @@ modifying or redistributing it. External library and model terms also apply.
   original file again, rather than repeatedly resizing an already reduced image.
   Size changes retain each codec's latest result and encode-time reference metadata. Only selecting
   a new source clears results. Rows show each result's dimensions so mixed sizes are clear.
-- JPEG AI: three-way Operating point control with full names only. Its hover/focus/tap
-  tooltip explains each point's trade-offs and use cases. Simple Operation Point (SOP)
+- JPEG AI: the table's three full-name column headings are the operating-point selector.
+  Hover/focus/tap on the heading text explains each point's trade-offs and use cases. Simple Operation Point (SOP)
   uses the lightest decoder, useful for previews/resource-limited devices with potentially
   lower fidelity; Base Operation Point (BOP) is the balanced default; High Operation Point
   (HOP) prioritises compression efficiency over decode speed and memory. All offer four models,
   adjustable quantisation and actual target-bpp search within the selected operating point.
   Changing point retains the last output until the next encode; its table row and
   download filename identify the point actually encoded. There is still one result per codec.
-- Desktop shows all twelve compact model cards as three stacked rows of four; mobile
-  shows the current group (plus an in-progress download so Cancel remains accessible).
-  Cards show actual file sizes, selection and cached state. Selecting a card only selects
-  its operating point and model. Only Download fetches weights; encoding is cache-only
-  and remains disabled until the selected model (or all four in automatic mode) is ready.
-  Downloading a different card does not change the selection. Cards support Remove and
-  Cancel; integrity verification stays internal, with no model file export/import.
+- A compact model table shows four model rows and three full-name operating-point columns.
+  Model purpose appears once per row; identical per-model sizes appear once in each column
+  heading (individual sizes are shown if they differ). Clicking a whole cell selects that
+  specific model and point, with a persistent border/check/Selected label. Clicking a family
+  heading chooses automatic model selection within that point and highlights the whole
+  column. A Using summary makes the active choice explicit, independent of keyboard focus.
+  Centered, neutral arrow buttons download; red trash buttons remove. These actions never
+  change selection. Encoding is cache-only and disabled until the selected model (or all
+  four for automatic search) is ready. All three columns remain available on mobile, using
+  compact accessible action icons. Stored models use XX MiB appears under the table;
+  no automatic cleanup or expiry is implemented. Integrity verification stays internal;
+  no model file import/export.
 - JPEG: quality, progressive mode and chroma subsampling (MozJPEG).
 - AVIF: quality, effort, lossless and chroma subsampling (jSquash/libavif).
 - JPEG XL: quality, effort, lossless and progressive encoding (jSquash/libjxl).
