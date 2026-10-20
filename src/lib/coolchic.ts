@@ -7,8 +7,8 @@ export async function loadCoolChic(settings: Settings, progress: (text: string) 
   const iterations = settings.coolchicIterations ?? 2000;
   const lambda = settings.coolchicLambda ?? 0.001;
   if (!['lop', 'mop', 'hop', 'vhop'].includes(point)) throw new Error('Unknown Cool-chic operating point.');
-  if (!Number.isInteger(iterations) || iterations < 2000 || iterations > 100000) {
-    throw new Error('Cool-chic reference training requires 2000–100000 iterations.');
+  if (!Number.isInteger(iterations) || iterations < 500 || iterations > 100000) {
+    throw new Error('Cool-chic training requires 500–100000 iterations.');
   }
   if (!Number.isFinite(lambda) || lambda < 0.000001 || lambda > 0.1) {
     throw new Error('Cool-chic rate constraint must be between 0.000001 and 0.1.');
@@ -21,15 +21,16 @@ export async function loadCoolChic(settings: Settings, progress: (text: string) 
       let encoder: InstanceType<typeof CoolChicEncoder> | undefined;
       try {
         encoder = new CoolChicEncoder(new Uint8Array(image.data.buffer, image.data.byteOffset, image.data.byteLength), image.width, image.height, point, iterations, lambda);
-        let done = false;
-        while (!done) {
-          const deadline = performance.now() + 16;
-          do { done = encoder.step(); } while (!done && performance.now() < deadline);
-          progress(`Training Cool-chic ${point.toUpperCase()} · ${encoder.status}`);
-          // Batched bounded iterations keep progress observable without adding
-          // a timer delay to every small optimization step. Cancel terminates
-          // the worker, including any in-flight WASM call.
-          if (!done) await new Promise<void>(resolve => setTimeout(resolve, 0));
+        let lastProgress = -Infinity;
+        while (!encoder.step()) {
+          const now = performance.now();
+          if (now - lastProgress >= 100) {
+            progress(`Training Cool-chic ${point.toUpperCase()} · ${encoder.status}`);
+            lastProgress = now;
+          }
+          // This runs only in a dedicated worker: postMessage updates the UI
+          // without timer pauses. Cancellation terminates the worker directly,
+          // including an in-flight WASM call.
         }
         progress('Entropy-coding the .cool bitstream…');
         const trained = encoder;

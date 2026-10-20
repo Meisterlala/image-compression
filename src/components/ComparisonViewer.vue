@@ -7,13 +7,18 @@ const props = defineProps<{ left: ImageData; right: ImageData; leftLabel: string
 const original = ref<HTMLCanvasElement | null>(null);
 const decoded = ref<HTMLCanvasElement | null>(null);
 const divider = usePersistentRef('comparison-divider', 50);
-const splitting = ref(false);
+const splitPointer = ref<number | null>(null);
+const viewport = ref<HTMLDivElement | null>(null);
+const stage = ref<HTMLDivElement | null>(null);
+const pointers = new Map<number, { x: number; y: number }>();
+const panning = ref(false);
 function updateSplit(event: PointerEvent) {
   const bounds = original.value?.getBoundingClientRect();
   if (bounds) divider.value = Math.max(0, Math.min(100, (event.clientX - bounds.left) / bounds.width * 100));
 }
 function startSplit(event: PointerEvent) {
-  splitting.value = true;
+  if (splitPointer.value !== null) return;
+  splitPointer.value = event.pointerId;
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   updateSplit(event);
 }
@@ -22,9 +27,67 @@ const dpr = ref(window.devicePixelRatio);
 const viewportHeight = ref(window.innerHeight);
 const stageStyle = computed(() => {
   return zoom.value === 'fit'
-    ? { width: `${Math.min(props.left.width, (Math.max(320, Math.min(viewportHeight.value * 0.52, 660)) - 28) * props.left.width / props.left.height)}px`, maxWidth: '100%' }
+    ? { width: `${(Math.max(320, Math.min(viewportHeight.value * 0.52, 660)) - 28) * props.left.width / props.left.height}px`, maxWidth: '100%' }
     : { width: `${props.left.width * Number(zoom.value) / dpr.value}px`, maxWidth: 'none' };
 });
+const customZoom = computed(() => !['fit', '1', '2', '4'].includes(zoom.value));
+
+// Keep the image point beneath the gesture stationary as its rendered size changes.
+async function zoomAt(scale: number, from: { x: number; y: number }, to = from) {
+  const bounds = stage.value?.getBoundingClientRect();
+  if (!bounds || !viewport.value) return;
+  const x = (from.x - bounds.left) / bounds.width;
+  const y = (from.y - bounds.top) / bounds.height;
+  zoom.value = String(Math.max(0.05, Math.min(16, scale)));
+  await nextTick();
+  const resized = stage.value?.getBoundingClientRect();
+  if (!resized || !viewport.value) return;
+  viewport.value.scrollLeft += resized.left + x * resized.width - to.x;
+  viewport.value.scrollTop += resized.top + y * resized.height - to.y;
+}
+function startPan(event: PointerEvent) {
+  if (event.button !== 0 || splitPointer.value !== null) return;
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  panning.value = true;
+}
+function movePan(event: PointerEvent) {
+  const previous = pointers.get(event.pointerId);
+  if (!previous || !viewport.value) return;
+  const before = [...pointers.values()];
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  const after = [...pointers.values()];
+  if (before.length === 1) {
+    viewport.value.scrollLeft += previous.x - event.clientX;
+    viewport.value.scrollTop += previous.y - event.clientY;
+  } else if (before.length === 2) {
+    const distance = (points: typeof before) => Math.hypot(points[1]!.x - points[0]!.x, points[1]!.y - points[0]!.y);
+    const center = (points: typeof before) => ({ x: (points[0]!.x + points[1]!.x) / 2, y: (points[0]!.y + points[1]!.y) / 2 });
+    const bounds = stage.value?.getBoundingClientRect();
+    if (bounds && distance(before) > 0) {
+      const scale = bounds.width * dpr.value / props.left.width;
+      void zoomAt(scale * distance(after) / distance(before), center(before), center(after));
+    }
+  }
+}
+function endPan(event: PointerEvent) {
+  pointers.delete(event.pointerId);
+  panning.value = pointers.size > 0;
+}
+function endSplit(event: PointerEvent) {
+  if (splitPointer.value === event.pointerId) splitPointer.value = null;
+}
+function wheelZoom(event: WheelEvent) {
+  // Both mouse wheels and trackpad pinch zoom around the pointer.
+  if (!stage.value) return;
+  event.preventDefault();
+  const scale = stage.value.getBoundingClientRect().width * dpr.value / props.left.width;
+  const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.value?.clientHeight ?? 400 : 1);
+  // Wheel deltas vary wildly between devices. Cap each event to a small step
+  // rather than letting a large delta multiply the zoom several times over.
+  const step = Math.max(-40, Math.min(40, delta));
+  void zoomAt(scale * Math.exp(-step * 0.0015), { x: event.clientX, y: event.clientY });
+}
 async function render() {
   await nextTick();
   draw(original.value, props.left);
@@ -48,11 +111,22 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateDpr));
             <option value="1">1:1 left-image pixels</option>
             <option value="2">2× left-image pixels</option>
             <option value="4">4× left-image pixels</option>
+            <option v-if="customZoom" :value="zoom">{{ Math.round(Number(zoom) * 100) }}% (custom)</option>
           </select>
         </label>
       </div>
-      <div class="viewer-scroll" :class="{ fitting: zoom === 'fit' }">
-        <div class="image-stage" :class="{ magnified: Number(zoom) >= 2 }" :style="stageStyle">
+      <div
+        ref="viewport"
+        class="viewer-scroll"
+        :class="{ fitting: zoom === 'fit', panning }"
+        @pointerdown.prevent="startPan"
+        @pointermove="movePan"
+        @pointerup="endPan"
+        @pointercancel="endPan"
+        @lostpointercapture="endPan"
+        @wheel="wheelZoom"
+      >
+        <div ref="stage" class="image-stage" :class="{ magnified: Number(zoom) >= 2 }" :style="stageStyle">
           <canvas ref="original" class="image-canvas left-canvas" :aria-label="`Left ${leftLabel} image`"></canvas>
           <canvas
             ref="decoded"
@@ -63,10 +137,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateDpr));
           <div
             class="image-divider"
             :style="{ left: `${divider}%` }"
-            @pointerdown.prevent="startSplit"
-            @pointermove="splitting && updateSplit($event)"
-            @pointerup="splitting = false"
-            @pointercancel="splitting = false"
+            @pointerdown.stop.prevent="startSplit"
+            @pointermove.stop="splitPointer === $event.pointerId && updateSplit($event)"
+            @pointerup.stop="endSplit"
+            @pointercancel.stop="endSplit"
+            @lostpointercapture.stop="endSplit"
           ><span>↔</span></div>
           <span class="image-label original-label">{{ leftLabel }}</span>
           <span class="image-label decoded-label">{{ rightLabel }}</span>
@@ -76,7 +151,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateDpr));
         Comparison split
         <input v-model.number="divider" type="range" min="0" max="100" aria-label="Image comparison split">
       </label>
-      <p v-if="zoom !== 'fit'" class="preview-hint">Scroll horizontally or vertically to pan. Zoom is measured in device pixels.</p>
+      <p class="preview-hint">Drag the image to pan; scroll or pinch with two fingers to zoom. Drag the ↔ handle to move the comparison split. Zoom is measured in device pixels.</p>
   </section>
 </template>
 
@@ -112,6 +187,14 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateDpr));
   overflow: auto;
   padding: 14px;
   background: var(--viewer-background);
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+  overscroll-behavior: contain;
+}
+
+.viewer-scroll.panning {
+  cursor: grabbing;
 }
 
 .viewer-scroll.fitting {

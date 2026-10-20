@@ -37,7 +37,6 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
       <h2 :id="`${format.id}-title`">{{ format.label }}</h2>
     </header>
     <section class="pane-settings" aria-label="Settings">
-      <CodecControls v-model="settings" :disabled="working || importing" />
       <ModelLibrary
         v-if="format.id === 'jpegai'"
         :operating-point="settings.operatingPoint"
@@ -50,6 +49,7 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
         @busy="modelBusy = $event"
         @ready="modelsReady = $event"
       />
+      <CodecControls v-model="settings" :disabled="working || importing" />
     </section>
     <p v-if="status.error" class="error" role="alert">{{ status.error }}</p>
     <p v-if="changed" class="changed-note">Settings or image size changed. Showing the previous result; encode again to update it.</p>
@@ -70,11 +70,19 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
         <p v-if="working" class="pane-status" role="status" aria-live="polite">{{ status.message }}</p>
       </template>
     </div>
+    <p v-if="result?.decodeBackend" class="pane-status" :data-decode-backend="result.decodeBackend">Preview decoded with {{ result.decodeBackend === 'webgpu' ? 'WebGPU' : 'CPU' }} · Encoding uses CPU.</p>
+    <p v-if="result?.decodeWarning" class="gpu-warning" role="status" :title="result.decodeWarning">WebGPU unavailable — decoded on CPU.</p>
     <ResultDownloads v-if="result" :result="result" :file="file" />
   </section>
 </template>
 
 <style scoped>
+.gpu-warning {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0;
+}
+
 .codec-pane {
   container-type: inline-size;
   min-width: 0;

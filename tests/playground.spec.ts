@@ -37,7 +37,7 @@ function pointOption(page: Page, point: string) {
 
 async function choosePoint(page: Page, point: string) {
   const panel = pane(page, 'jpegai');
-  if (await panel.getByLabel('Model selection', { exact: true }).inputValue() === 'target') {
+  if (await panel.locator('.model-control').getAttribute('data-rate-mode') === 'target') {
     await pointOption(page, point).click();
   } else {
     const id = Number(await panel.locator('.model-control').getAttribute('data-selected-model'));
@@ -60,7 +60,7 @@ async function settings(page: Page, format: string) {
 
 async function downloadModels(page: Page) {
   const panel = pane(page, 'jpegai');
-  const target = await panel.getByLabel('Model selection', { exact: true }).inputValue() === 'target';
+  const target = await panel.locator('.model-control').getAttribute('data-rate-mode') === 'target';
   const rows = panel.locator(target ? '.model-control tbody tr' : '.model-control tbody tr.selected');
   await expect(rows).toHaveCount(target ? 4 : 1);
   const point = (await panel.locator('.model-control').getAttribute('data-operating-point'))!;
@@ -83,6 +83,46 @@ async function run(page: Page, format: string) {
   await expect(panel.getByRole('alert')).toHaveCount(0);
   await expect(resultRow(page, format).locator('[data-metric="encode"]')).toHaveAttribute('data-ms', /[0-9]/);
 }
+
+test('JPEG AI GPU toggle defaults on, warns on fallback and supports persistent CPU opt-out', async ({ page }) => {
+  // Simulate a browser without worker WebGPU even on GPU-equipped test machines.
+  await page.route('**/assets/codec.worker-*.js', async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: `Object.defineProperty(navigator, 'gpu', { value: undefined });\n${await response.text()}` });
+  });
+  await page.goto('/');
+  const toggle = page.getByRole('checkbox', { name: 'GPU decoding', exact: true });
+  await expect(toggle).toBeChecked();
+  await expect(page.getByLabel('Model selection', { exact: true })).toHaveCount(0);
+  const quantisationHelp = page.getByRole('button', { name: 'About Quantisation shift', exact: true });
+  await quantisationHelp.focus();
+  await expect(page.getByRole('tooltip')).toContainText('Lower values mean coarser quantisation');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('tooltip')).toBeHidden();
+  await quantisationHelp.click();
+  await expect(page.getByRole('tooltip')).toContainText('Zero uses the model’s default quantisation');
+  await page.keyboard.press('Escape');
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const table = await page.getByRole('table', { name: 'JPEG AI model downloads' }).boundingBox();
+    const slider = await page.getByRole('slider', { name: 'Quantisation shift', exact: true }).boundingBox();
+    const gpu = await toggle.boundingBox();
+    expect(slider!.y).toBeGreaterThan(table!.y + table!.height);
+    if (width > 800) expect(gpu!.x).toBeGreaterThan(slider!.x + slider!.width);
+    else expect(gpu!.y).toBeGreaterThan(slider!.y + slider!.height);
+  }
+  await upload(page);
+  await run(page, 'jpegai');
+  const panel = pane(page, 'jpegai');
+  await expect(panel.locator('[data-decode-backend]')).toHaveAttribute('data-decode-backend', 'cpu');
+  await expect(panel.locator('.gpu-warning')).toHaveText('WebGPU unavailable — decoded on CPU.');
+  await toggle.uncheck();
+  await run(page, 'jpegai');
+  await expect(panel.locator('[data-decode-backend]')).toHaveAttribute('data-decode-backend', 'cpu');
+  await expect(panel.locator('.gpu-warning')).toHaveCount(0);
+  await page.reload();
+  await expect(toggle).not.toBeChecked();
+});
 
 test('codec tabs retain five real WASM outputs with one visible panel', async ({ page }) => {
   const requests: string[] = [];
@@ -258,7 +298,8 @@ test('SOP/BOP/HOP selector explains the trade-off and uses real independent mode
 test('matrix selection is persistent and distinguishes a model from an automatic family', async ({ page }) => {
   await page.goto('/');
   const panel = pane(page, 'jpegai');
-  const mode = panel.getByLabel('Model selection', { exact: true });
+  const mode = panel.locator('.model-control');
+  await expect(panel.getByLabel('Model selection', { exact: true })).toHaveCount(0);
   await expect(panel.locator('.point-options')).toHaveCount(0);
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
@@ -278,16 +319,16 @@ test('matrix selection is persistent and distinguishes a model from an automatic
     }
   }
   await pointOption(page, 'hop').click(); // A family heading directly chooses automatic selection.
-  await expect(mode).toHaveValue('target');
+  await expect(mode).toHaveAttribute('data-rate-mode', 'target');
   await expect(panel.locator('.model-cell.automatic')).toHaveCount(4);
   await expect(panel.locator('.model-cell.active')).toHaveCount(0);
   await expect(panel.locator('.selection-summary')).toContainText('High Operation Point · Automatic model selection');
   await choosePoint(page, 'sop');
-  await expect(mode).toHaveValue('target');
+  await expect(mode).toHaveAttribute('data-rate-mode', 'target');
   await expect(modelHeader(page, 'sop').locator('.automatic-label')).toHaveText('Automatic');
   await modelCell(page, 'bop', 0).locator('.model-select').focus();
   await page.keyboard.press('Space');
-  await expect(mode).toHaveValue('model');
+  await expect(mode).toHaveAttribute('data-rate-mode', 'model');
   await expect(modelCell(page, 'bop', 0)).toHaveClass(/active/);
   await expect(panel.locator('.selection-summary')).toContainText('Base Operation Point · Model 1');
 });
@@ -307,8 +348,7 @@ test('SOP encodes with its own decoder and supports target search without implic
   expect(weights).toBe(1); // Changing operating point does not fetch weights.
   await run(page, 'jpegai');
   expect(await page.getByLabel('Right JPEG AI image', { exact: true }).evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL())).not.toBe(sop);
-  await choosePoint(page, 'sop');
-  await pane(page, 'jpegai').getByLabel('Model selection', { exact: true }).selectOption('target');
+  await pointOption(page, 'sop').click();
   await run(page, 'jpegai');
   await expect(resultRow(page, 'jpegai')).toHaveAttribute('data-operating-point', 'sop');
   expect(weights).toBe(5); // Four SOP bundles + the one explicitly downloaded BOP bundle.
@@ -347,8 +387,7 @@ test('HOP target-bpp search loads only HOP bundles and decodes its actual output
   const weights: string[] = [];
   page.on('request', request => { if (request.url().includes('.zjb')) weights.push(request.url()); });
   await page.goto('/'); await upload(page);
-  await choosePoint(page, 'hop');
-  await pane(page, 'jpegai').getByLabel('Model selection', { exact: true }).selectOption('target');
+  await pointOption(page, 'hop').click();
   await run(page, 'jpegai');
   await expect(resultRow(page, 'jpegai')).toHaveAttribute('data-operating-point', 'hop');
   await expect(page.getByLabel('Right JPEG AI image', { exact: true })).toHaveAttribute('width', '96');
@@ -388,9 +427,9 @@ test('lossless modes really reconstruct identical working pixels', async ({ page
 test('target-bpp search produces a real JPEG AI result', async ({ page }) => {
   await page.goto('/'); await upload(page);
   await settings(page, 'jpegai');
-  await pane(page, 'jpegai').getByLabel('Model selection', { exact: true }).selectOption('target');
+  await pointOption(page, 'bop').click();
   await run(page, 'jpegai');
-  await expect(pane(page, 'jpegai').getByLabel('Model selection', { exact: true })).toHaveValue('target');
+  await expect(pane(page, 'jpegai').locator('.model-control')).toHaveAttribute('data-rate-mode', 'target');
   await expect(page.getByLabel('Right JPEG AI image', { exact: true })).toBeVisible();
 });
 
@@ -653,8 +692,7 @@ test('HOP target search checks synthesis memory before loading cached weights', 
   });
   await page.getByLabel('Choose image file', { exact: true }).setInputFiles({ name: 'hop-memory.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
   const panel = pane(page, 'jpegai');
-  await choosePoint(page, 'hop');
-  await panel.getByLabel('Model selection', { exact: true }).selectOption('target');
+  await pointOption(page, 'hop').click();
   await downloadModels(page);
   await page.route('**/models/*.zjb*', route => { weights++; return route.abort(); });
   await panel.getByRole('button', { name: 'Encode', exact: true }).click();

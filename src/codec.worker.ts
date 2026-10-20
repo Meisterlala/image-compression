@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import init, { JpegAi, metrics } from './wasm/codec';
 import { loadCodec } from './lib/codecs';
+import { decodeJpegAi } from './lib/jpegai-decode';
 import type { Job, Result, WorkerMessage } from './types';
 import { getCachedModel, loadManifest } from './lib/models';
 import { JPEG_AI_CONFIRM_THRESHOLD, JPEG_AI_MEMORY_LIMIT, MAX_PIXELS } from './lib/limits';
@@ -26,6 +27,8 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
     await init();
     let encoded: Uint8Array<ArrayBuffer>;
     let decoded: Uint8ClampedArray<ArrayBuffer>;
+    let decodeBackend: Result['decodeBackend'];
+    let decodeWarning: string | undefined;
     let modelSize = 0;
     let estimatedMemory: number | null = null;
     const notices: string[] = [];
@@ -33,6 +36,7 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
     let confirmationWaitMs = 0;
     if (s.format === 'jpegai') {
       const ai = new JpegAi(s.operatingPoint);
+      try {
       const point = s.operatingPoint.toUpperCase();
       estimatedMemory = ai.estimateMemory(width, height, s.rateMode === 'target');
       if (estimatedMemory > JPEG_AI_MEMORY_LIMIT) throw new Error('Estimated JPEG AI working memory exceeds the 3 GiB cap. Choose a smaller size under Downscale image.');
@@ -60,11 +64,16 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
       let tick = performance.now();
       encoded = new Uint8Array(ai.encode(new Uint8Array(pixels.buffer), width, height, s.model, s.displacement, s.rateMode === 'target' ? s.targetBpp : 0));
       encodeMs = performance.now() - tick;
-      progress(`Decoding the actual JPEG AI ${point} bitstream…`);
+      progress(s.gpuDecode !== false ? `Decoding JPEG AI ${point} with WebGPU (CPU fallback if needed)…` : `Decoding JPEG AI ${point} on CPU…`);
       tick = performance.now();
-      decoded = new Uint8ClampedArray(ai.decode(encoded));
+      const reconstruction = await decodeJpegAi(ai, encoded, s.gpuDecode !== false);
+      decoded = new Uint8ClampedArray(reconstruction.pixels);
+      decodeBackend = reconstruction.backend;
+      decodeWarning = reconstruction.warning;
       decodeMs = performance.now() - tick;
-      ai.free();
+      } finally {
+        ai.free();
+      }
     } else {
       progress(`Loading ${s.format.toUpperCase()} encoder and decoder…`);
       const codec = await loadCodec(s.format, s, progress);
@@ -96,7 +105,7 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
     progress('Measuring quality in Rust/WASM…');
     const tick = performance.now();
     const measured = metrics(new Uint8Array(pixels.buffer), new Uint8Array(decoded.buffer), width, height) as Result['metrics'];
-    const result: Result = { referenceBytes: job.referenceBytes, referenceDownscaled: job.referenceDownscaled, settings: s, width, height, encoded, pixels: decoded, metrics: measured, startupMs, encodeMs, decodeMs, metricsMs: performance.now() - tick, estimatedMemory, modelBytes: modelSize, notices: [...new Set(notices)] };
+    const result: Result = { referenceBytes: job.referenceBytes, referenceDownscaled: job.referenceDownscaled, settings: s, width, height, encoded, pixels: decoded, metrics: measured, startupMs, encodeMs, decodeMs, metricsMs: performance.now() - tick, estimatedMemory, decodeBackend, decodeWarning, modelBytes: modelSize, notices: [...new Set(notices)] };
     self.postMessage({ type: 'result', result } satisfies WorkerMessage, { transfer: [encoded.buffer, decoded.buffer] });
   } catch (e) {
     self.postMessage({ type: 'error', error: e instanceof Error ? e.message : String(e) } satisfies WorkerMessage);

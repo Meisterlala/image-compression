@@ -10,7 +10,7 @@ import { useComparisons } from './lib/comparisons';
 
 import { usePersistence, usePersistentRef, usePersistentState } from './lib/persistence';
 
-const { error: storageError, pending: saving } = usePersistence();
+const { error: storageError } = usePersistence();
 const activeFormat = usePersistentRef<Format>('active-format', 'jpegai');
 function tabKey(event: KeyboardEvent, index: number) {
   let next: number;
@@ -121,7 +121,6 @@ async function loadFile(chosen: File, resizing = false) {
     </header>
     <main>
       <p v-if="storageError" class="error-panel" role="alert">{{ storageError }}</p>
-      <span v-else class="import-status" role="status" data-persistence>{{ saving ? 'Saving locally…' : 'Saved locally in this browser. Clearing site data removes saved work.' }}</span>
       <span v-if="importing" class="import-status" role="status">Opening image…</span>
       <p v-if="error" class="error-panel" role="alert">{{ error }}</p>
       <div class="codec-tabs" role="tablist" aria-label="Image format">

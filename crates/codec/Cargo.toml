@@ -17,6 +17,10 @@ js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+zenjpegai-gpu = { git = "https://github.com/imazen/zenjpegai", rev = "1192fca6b6c2fdc4dcf29a6c8064c53a987caf59", default-features = false }
+wasm-bindgen-futures = "0.4"
+
 [[bin]]
 name = "pack-models"
 path = "src/bin/pack-models.rs"

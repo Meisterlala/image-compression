@@ -73,7 +73,7 @@ onBeforeUnmount(() => { refreshVersion++; abort?.abort(); emit('busy', false); e
 </script>
 
 <template>
-  <div class="model-control" role="group" aria-label="JPEG AI models" :data-operating-point="operatingPoint" :data-selected-model="selected">
+  <div class="model-control" role="group" aria-label="JPEG AI models" :data-operating-point="operatingPoint" :data-selected-model="selected" :data-rate-mode="rateMode">
     <p class="selection-summary" aria-live="polite">Using <strong>{{ operatingPoints.find(point => point.id === operatingPoint)?.label }}</strong> · {{ rateMode === 'target' ? 'Automatic model selection' : `Model ${selected + 1}` }}</p>
     <div class="model-scroll" role="region" aria-label="Scroll model table" tabindex="0">
       <table aria-label="JPEG AI model downloads">

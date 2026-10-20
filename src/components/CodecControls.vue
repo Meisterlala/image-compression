@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import MetricTooltip from './MetricTooltip.vue';
 import { computed } from 'vue';
 import type { Settings } from '../types';
+import MetricTooltip from './MetricTooltip.vue';
 import { coolchicPoints, coolchicPointDescriptions, rateFromSlider, rateToSlider, iterationsFromSlider, iterationsToSlider } from '../lib/coolchic-controls';
 const settings = defineModel<Settings>({ required: true });
 defineProps<{ disabled: boolean }>();
@@ -15,29 +15,31 @@ const coolchicIterations = computed({
   get: () => iterationsToSlider(settings.value.coolchicIterations),
   set: (value: number) => { settings.value.coolchicIterations = iterationsFromSlider(value); },
 });
+// Older persisted settings without this field also default to GPU-first.
+const gpuDecode = computed({
+  get: () => settings.value.gpuDecode !== false,
+  set: (value: boolean) => { settings.value = { ...settings.value, gpuDecode: value }; },
+});
 </script>
 
 <template>
   <fieldset class="settings-grid" :class="{ 'jpegai-settings': settings.format === 'jpegai' }" :disabled="disabled">
     <legend class="sr-only">Encoding settings</legend>
     <template v-if="settings.format === 'jpegai'">
-      <div class="field">
-        <label :for="id('rate-mode')">Model selection</label>
-        <select :id="id('rate-mode')" v-model="settings.rateMode">
-          <option value="model">Use selected model</option>
-          <option value="target">Choose model automatically</option>
-        </select>
-      </div>
       <template v-if="settings.rateMode === 'model'">
         <div class="field">
-          <label :for="id('displacement')">Quantisation shift <output>{{ settings.displacement }}</output></label>
-          <input :id="id('displacement')" v-model.number="settings.displacement" type="range" min="-1069" max="702" step="1">
+          <label :for="id('displacement')"><MetricTooltip label="Quantisation shift" :info-icon="false" text="Controls how coarsely the selected model’s learned image features are quantised (rounded). Lower values mean coarser quantisation: smaller files, but more detail lost. Higher values mean finer quantisation: better detail preservation, but larger files. Zero uses the model’s default quantisation." /> <output>{{ settings.displacement }}</output></label>
+          <input :id="id('displacement')" aria-label="Quantisation shift" v-model.number="settings.displacement" type="range" min="-1069" max="702" step="1">
           <div class="range-captions"><span>Smaller file</span><span>Higher fidelity</span></div>
         </div>
       </template>
       <div v-else class="field">
         <label :for="id('target-bpp')">Target bits / pixel <output>{{ settings.targetBpp.toFixed(2) }}</output></label>
         <input :id="id('target-bpp')" v-model.number="settings.targetBpp" type="range" min="0.1" max="2" step="0.05">
+      </div>
+      <div class="decode-setting">
+        <label class="checkbox-row"><input v-model="gpuDecode" type="checkbox"> GPU decoding</label>
+        <span>Falls back to CPU if unavailable</span>
       </div>
     </template>
     <template v-else-if="settings.format === 'coolchic'">
@@ -211,7 +213,6 @@ fieldset:disabled .point-choice input { cursor: default; }
 .control-heading :deep(.tooltip-trigger) { font-size: 0; border: 0; }
 .control-heading :deep(.info-icon) { font-size: 12px; margin-left: 0; }
 
-
 select {
   width: 100%;
   padding: 10px 8px;
@@ -223,8 +224,24 @@ select {
   border-radius: 6px;
 }
 
-.jpegai-settings select {
-  height: 56px;
+.jpegai-settings {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  padding-top: 20px;
+  gap: 20px 32px;
+}
+
+.decode-setting {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding-top: 16px;
+}
+
+.decode-setting > span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 input[type="range"] {
@@ -258,9 +275,17 @@ input[type="checkbox"] {
   accent-color: var(--accent);
 }
 
-@container (max-width: 600px) {
+@container (max-width: 800px) {
   .jpegai-settings {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .decode-setting {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    padding-top: 0;
   }
 }
 

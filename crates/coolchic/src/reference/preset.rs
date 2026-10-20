@@ -1,4 +1,5 @@
-//! Exact standard intra schedule from training/presets.py (MSE tuning).
+//! Standard intra schedule from training/presets.py (MSE tuning), with an
+//! explicitly non-reference shortened schedule for 500–1999-iteration fast runs.
 use super::quantizer::Quantizer;
 use crate::{Error, Result};
 
@@ -49,17 +50,24 @@ pub struct Intra {
 }
 impl Intra {
     pub fn new(iterations: usize, lambda: f32, start_lr: f64) -> Result<Self> {
-        if !(2000..=100_000).contains(&iterations)
+        if !(500..=100_000).contains(&iterations)
             || !lambda.is_finite()
             || lambda <= 0.0
             || !start_lr.is_finite()
             || start_lr <= 0.0
         {
             return Err(Error(
-                "Reference intra training needs 2000–100000 iterations and a positive rate constraint",
+                "Intra training needs 500–100000 iterations and a positive rate constraint",
             ));
         }
-        let warm = if iterations < 4000 {
+        // Below the official 2000 minimum, scale all stages and validation
+        // cadence proportionally. Keep the reference schedule unchanged above it.
+        let short = iterations < 2000;
+        let hard = if short { iterations / 4 } else { 500 };
+        let validation = if short { iterations / 20 } else { 100 };
+        let warm = if short {
+            iterations / 40
+        } else if iterations < 4000 {
             50
         } else if iterations < 9000 {
             100
@@ -73,7 +81,7 @@ impl Intra {
             warmup: Phase {
                 iterations: warm,
                 learning_rate: start_lr,
-                validation_frequency: 100,
+                validation_frequency: validation,
                 patience: warm,
                 cosine: false,
                 temperature: (0.35, 0.35),
@@ -81,9 +89,9 @@ impl Intra {
                 quantizer: Quantizer::Soft,
             },
             core: Phase {
-                iterations: iterations - 500 - 7 * warm,
+                iterations: iterations - hard - 7 * warm,
                 learning_rate: 0.01,
-                validation_frequency: 100,
+                validation_frequency: validation,
                 patience: 5000,
                 cosine: true,
                 temperature: (0.35, 0.08),
@@ -91,9 +99,9 @@ impl Intra {
                 quantizer: Quantizer::Soft,
             },
             hard: Phase {
-                iterations: 500,
+                iterations: hard,
                 learning_rate: 1e-4,
-                validation_frequency: 100,
+                validation_frequency: validation,
                 patience: 10000,
                 cosine: true,
                 temperature: (0.3, 0.3),

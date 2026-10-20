@@ -7,7 +7,7 @@ export const coolchicPointDescriptions = [
 ] as const;
 export const coolchicRateMin = 0.000001;
 export const coolchicRateMax = 0.1;
-export const coolchicIterationsMin = 2000;
+export const coolchicIterationsMin = 500;
 export const coolchicIterationsMax = 100000;
 
 function clamp(value: number, min: number, max: number, fallback: number) {
@@ -23,12 +23,15 @@ export function rateToSlider(value: number): number {
   return (Math.log10(lambda) + 6) * 20;
 }
 
-// Logarithmic spacing keeps 2k–10k useful while still reaching a 100k budget.
+// Ease into the exponential range: most of the track controls short runs.
+// The small linear term avoids a dead zone at the minimum.
 export function iterationsFromSlider(position: number): number {
-  const value = coolchicIterationsMin * 50 ** (clamp(position, 0, 100, 0) / 100);
-  return Math.round(value / 100) * 100;
+  const p = clamp(position, 0, 100, 0) / 100;
+  const ratio = coolchicIterationsMax / coolchicIterationsMin;
+  return Math.round(coolchicIterationsMin * ratio ** (0.15 * p + 0.85 * p * p));
 }
 export function iterationsToSlider(value: number): number {
-  const iterations = clamp(value, coolchicIterationsMin, coolchicIterationsMax, coolchicIterationsMin);
-  return Math.log(iterations / coolchicIterationsMin) / Math.log(50) * 100;
+  const iterations = clamp(value, coolchicIterationsMin, coolchicIterationsMax, 2000);
+  const exponent = Math.log(iterations / coolchicIterationsMin) / Math.log(coolchicIterationsMax / coolchicIterationsMin);
+  return (Math.sqrt(0.15 ** 2 + 3.4 * exponent) - 0.15) / 1.7 * 100;
 }

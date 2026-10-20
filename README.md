@@ -205,8 +205,15 @@ against `dist/` using Vite preview. It does not certify JPEG AI conformance.
   not silently resize it. Downscale selection is explicit.
   Browser decoding can allocate before the source-size check; not hardened against
   hostile decompression bombs. Use a smaller source on memory-constrained devices.
-- JPEG AI is CPU-only SOP/BOP/HOP, advanced optional coding tools off. No WebGPU or hidden
-  server fallback. Modern browsers with WASM SIMD are required for this build.
+- JPEG AI encodes SOP/BOP/HOP on CPU, with advanced optional coding tools off.
+  The JPEG AI “GPU decoding” setting is enabled by default (including older saved settings).
+  With it enabled, decoding attempts hardware WebGPU synthesis first, automatically retrying on CPU
+  on adapter/device/decode failure with a small warning. Disable it to use CPU without a warning.
+  No server fallback.
+  The preview labels its actual decoder; GPU pixels are not bit-identical to CPU pixels,
+  and quality metrics measure the actual preview. Decode timing includes GPU initialisation,
+  weight uploads and readback (each job uses a fresh worker). WebGPU requires a secure context;
+  browsers without it still work via CPU. Modern browsers with WASM SIMD are required.
 - JPEG AI's encode working-set cap is 3072 MiB (3 GiB), with the same decoder cap.
   HOP preflight also covers a conservative synthesis bound plus retained models, and
   pads the target-search model allowance rather than using BOP's smaller estimate.

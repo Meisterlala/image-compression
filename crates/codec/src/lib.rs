@@ -39,6 +39,8 @@ pub struct JpegAi {
     models: Models,
     encoder: Encoder,
     decoder: Decoder,
+    #[cfg(target_arch = "wasm32")]
+    gpu: Option<zenjpegai_gpu::GpuDecoder>,
 }
 
 #[wasm_bindgen]
@@ -47,7 +49,7 @@ impl JpegAi {
     pub fn new(operating_point: &str) -> Result<JpegAi, JsError> {
         let op = parse_operating_point(operating_point).map_err(JsError::new)?;
         let models = Models::default();
-        // One CPU worker, SIMD when compiled with +simd128. No WebGPU or server fallback.
+        // CPU encoder and fallback decoder, SIMD when compiled with +simd128.
         let engine = Engine::with(Tier::detect(), false);
         zenjpegai::nn::fast::set_pool_limit(32 << 20);
         Ok(Self {
@@ -65,6 +67,8 @@ impl JpegAi {
                         .with_max_memory(MEMORY_LIMIT),
                 ),
             models,
+            #[cfg(target_arch = "wasm32")]
+            gpu: None,
         })
     }
     #[wasm_bindgen(js_name = addModels)]
@@ -123,6 +127,37 @@ impl JpegAi {
         }
         Ok(bytes)
     }
+    /// Initialise the hardware decoder after cached model bundles have been loaded.
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen(js_name = initGpu)]
+    pub async fn init_gpu(&mut self) -> Result<(), JsError> {
+        let ctx = zenjpegai_gpu::GpuContext::new_async(&Default::default())
+            .await
+            .map_err(error)?;
+        self.gpu = Some(
+            zenjpegai_gpu::GpuDecoder::new(Arc::new(ctx), Box::new(self.models.clone()))
+                .operating_point(Some(self.op)),
+        );
+        Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen(js_name = decodeGpu)]
+    pub async fn decode_gpu(&mut self, stream: Vec<u8>) -> Result<Vec<u8>, JsError> {
+        // Check dimensions and operating point with the bounded CPU header reader first.
+        let headers = self.decoder.read_headers(&stream).map_err(error)?;
+        if headers.picture.synthesis_transforms.first() != Some(&self.op) {
+            return Err(JsError::new("encoded JPEG AI operating point does not match"));
+        }
+        let gpu = self.gpu.take().ok_or_else(|| JsError::new("WebGPU is not initialised"))?;
+        let result = gpu.decode_async(&stream).await;
+        gpu.release_buffers();
+        let image = result.map_err(error)?;
+        Ok(image.data.chunks_exact(3)
+            .flat_map(|p| [p[0] as u8, p[1] as u8, p[2] as u8, 255])
+            .collect())
+    }
+
     pub fn decode(&self, stream: &[u8]) -> Result<Vec<u8>, JsError> {
         let image = self.decoder.decode(stream).map_err(error)?;
         let rgba = image
