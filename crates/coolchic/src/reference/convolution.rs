@@ -49,6 +49,31 @@ impl Conv2d {
     pub fn forward(&self, input: &Tensor) -> Result<Tensor> {
         self.validate(input)?;
         let mut output = Tensor::zeros(self.output_channels, input.height, input.width)?;
+        // CHW pointwise GEMM: stream contiguous planes so LLVM can SIMD-
+        // vectorize in WASM, retaining the channel accumulation order.
+        if self.kernel == 1 {
+            let pixels = input.height * input.width;
+            for out in 0..self.output_channels {
+                let plane = &mut output.data[out * pixels..(out + 1) * pixels];
+                for channel in 0..input.channels {
+                    let weight = self.weight[out * input.channels + channel];
+                    let source = &input.data[channel * pixels..(channel + 1) * pixels];
+                    for (value, &sample) in plane.iter_mut().zip(source) {
+                        *value += sample * weight;
+                    }
+                }
+                for (i, value) in plane.iter_mut().enumerate() {
+                    *value += self.bias[out];
+                    if self.residual {
+                        *value += input.data[out * pixels + i];
+                    }
+                    if self.relu {
+                        *value = value.max(0.0);
+                    }
+                }
+            }
+            return Ok(output);
+        }
         let pad = self.kernel / 2;
         for out in 0..self.output_channels {
             for y in 0..input.height {
@@ -98,6 +123,41 @@ impl Conv2d {
             weight: vec![0.0; self.weight.len()],
             bias: vec![0.0; self.bias.len()],
         };
+        if self.kernel == 1 {
+            let pixels = input.height * input.width;
+            let mut gated = vec![0.0; pixels];
+            for out in 0..self.output_channels {
+                for (i, g) in gated.iter_mut().enumerate() {
+                    let oi = out * pixels + i;
+                    *g = if activated.as_ref().is_some_and(|a| a.data[oi] <= 0.0) {
+                        0.0
+                    } else {
+                        gradient.data[oi]
+                    };
+                    result.bias[out] += *g;
+                }
+                if self.residual {
+                    for (value, &g) in result.input.data[out * pixels..(out + 1) * pixels]
+                        .iter_mut()
+                        .zip(&gated)
+                    {
+                        *value += g;
+                    }
+                }
+                for channel in 0..input.channels {
+                    let wi = out * input.channels + channel;
+                    let source = &input.data[channel * pixels..(channel + 1) * pixels];
+                    let target = &mut result.input.data[channel * pixels..(channel + 1) * pixels];
+                    let mut dw = 0.0;
+                    for i in 0..pixels {
+                        target[i] += gated[i] * self.weight[wi];
+                        dw += gated[i] * source[i];
+                    }
+                    result.weight[wi] = dw;
+                }
+            }
+            return Ok(result);
+        }
         let pad = self.kernel / 2;
         for out in 0..self.output_channels {
             for y in 0..input.height {
