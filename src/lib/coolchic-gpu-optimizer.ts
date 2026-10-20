@@ -1,4 +1,4 @@
-import { createBoundedGpuEncoder } from './coolchic-tensor-replay';
+import { createBoundedGpuEncoder, uploadGpuBuffer } from './coolchic-tensor-replay';
 
 // GPU-resident reference SOAP, including its first-update skip and latent
 // Adam-like groups. Only the small eigendecomposition/QR problems visit WASM.
@@ -41,7 +41,7 @@ export class GpuSoap {
   }
   upload(values: Float32Array) {
     if (values.length !== this.layout.size) throw new Error('Invalid SOAP state length');
-    this.device.queue.writeBuffer(this.state, 0, new Float32Array(values));
+    uploadGpuBuffer(this.device,this.state,values);
     for (const tensor of this.layout.tensors) for (const axis of tensor.axes) {
       this.bases.set(axis, values.slice(axis.basis, axis.basis + axis.dimension ** 2));
     }

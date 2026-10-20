@@ -41,7 +41,10 @@ groups without rebuilding the autodiff graph. Optimizer commands are cached too;
 noise and learning-rate data upload once per batch. Replays preserve the backend's
 bounded command-buffer submissions instead of merging whole training batches into
 one oversized command buffer. These submissions are asynchronous; weights and
-moments remain GPU-resident between them. Switching between training and evaluation releases the previous command plan
+moments remain GPU-resident between them. Host uploads use 64 KiB transfer
+segments with prompt submissions, and noise buffers are split by iteration. This
+avoids expanding the small host-visible Vulkan heap on discrete NVIDIA devices
+without reducing image size, working VRAM limits, or adding per-transfer waits. Switching between training and evaluation releases the previous command plan
 and its optimizer bind groups, rather than retaining both GPU working sets. Target/common tensors stay cached
 until the graph descriptor changes. Gradient sums use bounded four-input groups
 to respect WebGPU storage-binding limits. Device validation errors are checked.

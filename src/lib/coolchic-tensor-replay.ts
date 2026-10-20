@@ -1,5 +1,21 @@
 import type { WebGPUBackend } from '@tensorflow/tfjs-backend-webgpu';
 
+/** Submit small upload segments promptly so staging does not consume NVIDIA's
+ * small host-visible Vulkan heap. This does not wait for GPU completion. */
+export function uploadGpuBuffer(device: GPUDevice, target: GPUBuffer, values: ArrayBufferView) {
+  const bytes = new Uint8Array(values.buffer,values.byteOffset,values.byteLength);
+  const chunkBytes = 64 * 1024;
+  for (let offset=0;offset<bytes.length;offset+=chunkBytes) {
+    const chunk = new Uint8Array(bytes.subarray(offset,offset+chunkBytes));
+    device.queue.writeBuffer(target,offset,chunk);
+    if (bytes.length > chunkBytes) {
+      // A real command-buffer submission also progresses worker queues in
+      // Firefox; submit([]) can leave pending writes waiting for a later submit.
+      device.queue.submit([device.createCommandEncoder().finish()]);
+    }
+  }
+}
+
 /** Keep the backend's 256-command submission boundary. Coalescing an entire
  * training batch into one command buffer can exhaust wgpu/Vulkan command-side
  * resources even with ample free VRAM. Submits remain asynchronous. */
