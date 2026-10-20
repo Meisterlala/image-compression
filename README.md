@@ -1,6 +1,6 @@
 # Image compression playground
 
-View it all online at https://compress.meisterlala.dev
+View it all online at https://compress.meisterlala.dev (first load might take 1min, it scales from 0)
 
 Compare JPEG AI, JPEG, AVIF, JPEG XL and Cool-chic v5 in your browser.
 Images stay on your device; there is no backend. Previews and metrics use decoded
