@@ -7,7 +7,7 @@ export const coolchicPointDescriptions = [
 ] as const;
 export const coolchicRateMin = 0.000001;
 export const coolchicRateMax = 0.1;
-export const coolchicIterationsMin = 500;
+export const coolchicIterationsMin = 100;
 export const coolchicIterationsMax = 100000;
 
 function clamp(value: number, min: number, max: number, fallback: number) {
@@ -23,15 +23,14 @@ export function rateToSlider(value: number): number {
   return (Math.log10(lambda) + 6) * 20;
 }
 
-// Ease into the exponential range: most of the track controls short runs.
-// The small linear term avoids a dead zone at the minimum.
+// Exact anchors: 100 at the left, 2000 at 25%, 100000 at the right.
 export function iterationsFromSlider(position: number): number {
-  const p = clamp(position, 0, 100, 0) / 100;
-  const ratio = coolchicIterationsMax / coolchicIterationsMin;
-  return Math.round(coolchicIterationsMin * ratio ** (0.15 * p + 0.85 * p * p));
+  const p = clamp(position, 0, 100, 0);
+  return Math.round(p <= 25 ? 100 * 20 ** (p / 25) : 2000 * 50 ** ((p - 25) / 75));
 }
 export function iterationsToSlider(value: number): number {
   const iterations = clamp(value, coolchicIterationsMin, coolchicIterationsMax, 2000);
-  const exponent = Math.log(iterations / coolchicIterationsMin) / Math.log(coolchicIterationsMax / coolchicIterationsMin);
-  return (Math.sqrt(0.15 ** 2 + 3.4 * exponent) - 0.15) / 1.7 * 100;
+  return iterations <= 2000
+    ? Math.log(iterations / 100) / Math.log(20) * 25
+    : 25 + Math.log(iterations / 2000) / Math.log(50) * 75;
 }

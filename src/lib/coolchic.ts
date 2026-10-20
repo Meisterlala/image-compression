@@ -1,14 +1,14 @@
-import type { Settings } from '../types';
+import type { EncodeProgress, Settings } from '../types';
 
 // Full reference MSE intra training and real bitstream decoding, in a dedicated
 // WASM module/worker. No Python, GPU runtime, downloaded weights or backend.
-export async function loadCoolChic(settings: Settings, progress: (text: string) => void) {
+export async function loadCoolChic(settings: Settings, progress: (text: string, info?: EncodeProgress) => void) {
   const point = settings.coolchicPoint ?? 'lop';
   const iterations = settings.coolchicIterations ?? 2000;
   const lambda = settings.coolchicLambda ?? 0.001;
   if (!['lop', 'mop', 'hop', 'vhop'].includes(point)) throw new Error('Unknown Cool-chic operating point.');
-  if (!Number.isInteger(iterations) || iterations < 500 || iterations > 100000) {
-    throw new Error('Cool-chic training requires 500–100000 iterations.');
+  if (!Number.isInteger(iterations) || iterations < 100 || iterations > 100000) {
+    throw new Error('Cool-chic training requires 100–100000 iterations.');
   }
   if (!Number.isFinite(lambda) || lambda < 0.000001 || lambda > 0.1) {
     throw new Error('Cool-chic rate constraint must be between 0.000001 and 0.1.');
@@ -20,12 +20,19 @@ export async function loadCoolChic(settings: Settings, progress: (text: string) 
     async encode(image: ImageData): Promise<Uint8Array<ArrayBuffer>> {
       let encoder: InstanceType<typeof CoolChicEncoder> | undefined;
       try {
+        const started = performance.now();
         encoder = new CoolChicEncoder(new Uint8Array(image.data.buffer, image.data.byteOffset, image.data.byteLength), image.width, image.height, point, iterations, lambda);
         let lastProgress = -Infinity;
         while (!encoder.step()) {
           const now = performance.now();
           if (now - lastProgress >= 100) {
-            progress(`Training Cool-chic ${point.toUpperCase()} · ${encoder.status}`);
+            const quantizing = encoder.completed >= iterations;
+            progress(`${quantizing ? 'Final optimization' : 'Training'} Cool-chic ${point.toUpperCase()} · ${encoder.status}`, {
+              stage: quantizing ? 'quantizing' : 'training',
+              completed: encoder.progressCompleted,
+              total: encoder.progressTotal,
+              elapsedMs: now - started,
+            });
             lastProgress = now;
           }
           // This runs only in a dedicated worker: postMessage updates the UI

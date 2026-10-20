@@ -57,6 +57,14 @@ impl CoolChicEncoder {
     pub fn iterations(&self) -> u32 {
         self.0.total_iterations() as u32
     }
+    #[wasm_bindgen(getter, js_name = progressCompleted)]
+    pub fn progress_completed(&self) -> u32 {
+        self.0.progress().0 as u32
+    }
+    #[wasm_bindgen(getter, js_name = progressTotal)]
+    pub fn progress_total(&self) -> u32 {
+        self.0.progress().1 as u32
+    }
     #[wasm_bindgen(getter)]
     pub fn status(&self) -> String {
         self.0.status()

@@ -1,5 +1,5 @@
 //! Standard intra schedule from training/presets.py (MSE tuning), with an
-//! explicitly non-reference shortened schedule for 500–1999-iteration fast runs.
+//! explicitly non-reference shortened schedule for 100–1999-iteration fast runs.
 use super::quantizer::Quantizer;
 use crate::{Error, Result};
 
@@ -50,14 +50,14 @@ pub struct Intra {
 }
 impl Intra {
     pub fn new(iterations: usize, lambda: f32, start_lr: f64) -> Result<Self> {
-        if !(500..=100_000).contains(&iterations)
+        if !(100..=100_000).contains(&iterations)
             || !lambda.is_finite()
             || lambda <= 0.0
             || !start_lr.is_finite()
             || start_lr <= 0.0
         {
             return Err(Error(
-                "Intra training needs 500–100000 iterations and a positive rate constraint",
+                "Intra training needs 100–100000 iterations and a positive rate constraint",
             ));
         }
         // Below the official 2000 minimum, scale all stages and validation

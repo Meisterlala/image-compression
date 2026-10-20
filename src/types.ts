@@ -18,4 +18,5 @@ export const defaultSettings: Settings = { coolchicPoint: 'lop', coolchicLambda:
 export interface Metrics { mse: number; psnr: number | null; ssim: number }
 export interface Job { referenceBytes: number; referenceDownscaled: boolean; pixels: Uint8ClampedArray<ArrayBuffer>; width: number; height: number; settings: Settings }
 export interface Result { referenceBytes: number; referenceDownscaled: boolean; settings: Settings; width: number; height: number; encoded: Uint8Array<ArrayBuffer>; pixels: Uint8ClampedArray<ArrayBuffer>; metrics: Metrics; startupMs: number; encodeMs: number; decodeMs: number; metricsMs: number; estimatedMemory: number | null; modelBytes: number; decodeBackend?: 'webgpu' | 'cpu'; decodeWarning?: string; notices: string[] }
-export type WorkerMessage = { type: 'progress'; text: string } | { type: 'result'; result: Result } | { type: 'error'; error: string } | { type: 'confirmation-required'; memoryBytes: number };
+export interface EncodeProgress { stage: 'training' | 'quantizing'; completed: number; total: number; elapsedMs: number }
+export type WorkerMessage = { type: 'progress'; text: string; progress?: EncodeProgress } | { type: 'result'; result: Result } | { type: 'error'; error: string } | { type: 'confirmation-required'; memoryBytes: number };

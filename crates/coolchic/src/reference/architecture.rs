@@ -155,7 +155,7 @@ impl Architecture {
         let specs = self.latent_specs();
         if specs
             .windows(2)
-            .any(|s| s[0].height > s[1].height * 2 || s[0].width > s[1].width * 2)
+            .any(|s| s[0].height.div_ceil(2) > s[1].height || s[0].width.div_ceil(2) > s[1].width)
         {
             return Err(Error(
                 "Reference latent hierarchy contains unsupported resolution gaps",

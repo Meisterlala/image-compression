@@ -1,9 +1,9 @@
 import { computed, onBeforeUnmount, reactive, shallowReactive, type Ref, type ShallowRef } from 'vue';
-import { defaultSettings, formats, type Format, type Result, type Settings } from '../types';
+import { defaultSettings, formats, type EncodeProgress, type Format, type Result, type Settings } from '../types';
 import { startJob } from './runner';
 
 export type Phase = 'idle' | 'queued' | 'running' | 'confirming' | 'done' | 'cancelled' | 'error';
-export interface PaneStatus { phase: Phase; message: string; error: string; confirmationBytes: number | null }
+export interface PaneStatus { progress?: EncodeProgress; phase: Phase; message: string; error: string; confirmationBytes: number | null }
 
 export function useComparisons(source: ShallowRef<ImageData | undefined>, referenceBytes: Ref<number>, downscaled: Ref<boolean>) {
   const settings = reactive(Object.fromEntries(formats.map(format => [
@@ -33,7 +33,7 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>, refere
         try {
           const job = startJob(
             { pixels: image.data, width: image.width, height: image.height, referenceBytes: referenceBytes.value, referenceDownscaled: downscaled.value, settings: next.settings },
-            text => state.message = text,
+            (text, progress) => { state.message = text; state.progress = progress; },
             memoryBytes => {
               state.confirmationBytes = memoryBytes;
               state.phase = 'confirming';
@@ -57,7 +57,7 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>, refere
             state.message = 'Encoding failed.';
             state.error = error instanceof Error ? error.message : String(error);
           }
-        } finally { state.confirmationBytes = null; active = undefined; }
+        } finally { state.confirmationBytes = null; state.progress = undefined; active = undefined; }
       }
     } finally { draining = false; }
   }
@@ -65,6 +65,7 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>, refere
   function run(format: Format) {
     const state = status[format];
     if (!source.value || state.phase === 'queued' || state.phase === 'running' || state.phase === 'confirming') return;
+    state.progress = undefined;
     state.phase = 'queued';
     state.error = '';
     state.message = 'Queued. Waiting for the current codec.';
@@ -98,7 +99,7 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>, refere
   function reset() {
     for (const { id } of formats) {
       delete results[id];
-      Object.assign(status[id], { phase: 'idle', message: '', error: '', confirmationBytes: null });
+      Object.assign(status[id], { phase: 'idle', message: '', error: '', confirmationBytes: null, progress: undefined });
     }
   }
 

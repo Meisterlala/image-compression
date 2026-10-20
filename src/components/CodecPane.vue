@@ -68,6 +68,13 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
         <button v-else class="encode-button" :disabled="!source || importing || modelBusy || (format.id === 'jpegai' && !modelsReady)" @click="emit('encode')">{{ result ? 'Encode again' : 'Encode' }}</button>
         <p v-if="source && format.id === 'jpegai' && !modelsReady && !modelBusy && !working" class="pane-status">{{ settings.rateMode === 'target' ? 'Download all four models to use automatic model selection.' : 'Download the selected model before encoding.' }}</p>
         <p v-if="working" class="pane-status" role="status" aria-live="polite">{{ status.message }}</p>
+        <div v-if="working && status.progress" class="encode-progress">
+          <progress :value="status.progress.completed" :max="status.progress.total" :aria-label="status.progress.stage === 'training' ? 'Training progress' : 'Final optimization progress'" />
+          <div class="progress-summary">
+            <span>{{ status.progress.completed }} / {{ status.progress.total }} {{ status.progress.stage === 'training' ? 'iterations' : 'optimization trials' }} · {{ Math.floor(status.progress.completed / status.progress.total * 100) }}%</span>
+            <span>{{ (status.progress.elapsedMs / 1000).toFixed(1) }} s elapsed</span>
+          </div>
+        </div>
       </template>
     </div>
     <p v-if="result?.decodeBackend" class="pane-status" :data-decode-backend="result.decodeBackend">Preview decoded with {{ result.decodeBackend === 'webgpu' ? 'WebGPU' : 'CPU' }} · Encoding uses CPU.</p>
@@ -77,6 +84,10 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
 </template>
 
 <style scoped>
+.encode-progress { width: 100%; max-width: 480px; }
+.encode-progress progress { width: 100%; height: 10px; accent-color: var(--accent); }
+.progress-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .25rem 1rem; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
 .gpu-warning {
   color: var(--muted);
   font-size: 12px;

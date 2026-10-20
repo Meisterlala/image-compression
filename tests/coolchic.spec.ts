@@ -93,13 +93,13 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   await expect(pane.getByRole('button', { name: 'Download Cool-chic 5.0', exact: true })).toBeVisible();
   await pane.getByRole('radio', { name: 'MOP', exact: true }).check();
   await pane.getByLabel('Rate constraint (λ)', { exact: true }).fill('80');
-  await pane.getByLabel('Training iterations', { exact: true }).fill('18');
+  await pane.getByLabel('Training iterations', { exact: true }).fill('50');
   await expect(page.locator('[data-persistence]')).toContainText('Saved locally');
   await page.reload();
   await expect(pane).toHaveAttribute('data-phase', 'done');
   await expect(pane.getByRole('radio', { name: 'MOP', exact: true })).toBeChecked();
   await expect(pane.getByLabel('Rate constraint (λ)', { exact: true })).toHaveAttribute('aria-valuetext', '0.01');
-  await expect(pane.getByLabel('Training iterations', { exact: true })).toHaveAttribute('aria-valuetext', '4000 iterations');
+  await expect(pane.getByLabel('Training iterations', { exact: true })).toHaveAttribute('aria-valuetext', '7368 iterations');
   const restored = page.waitForEvent('download');
   await pane.getByRole('button', { name: 'Download Cool-chic 5.0', exact: true }).click();
   const restoredFile = await restored;
@@ -182,6 +182,11 @@ test('Cool-chic segmented choices, intuitive sliders and practical tooltips are 
   await rate.fill('0'); await expect(rate).toHaveAttribute('aria-valuetext', '0.000001');
   await rate.fill('100'); await expect(rate).toHaveAttribute('aria-valuetext', '0.1');
   const iterations = pane.getByRole('slider', { name: 'Training iterations', exact: true });
+  await iterations.fill('0'); await expect(iterations).toHaveAttribute('aria-valuetext', '100 iterations');
+  await expect(pane.locator('.training-warning')).toContainText('Reference training requires at least 2,000');
+  await expect(pane.locator('.training-warning')).toBeInViewport();
+  await iterations.fill('25'); await expect(iterations).toHaveAttribute('aria-valuetext', '2000 iterations');
+  await expect(pane.locator('.training-warning')).toHaveCount(0);
   await iterations.fill('100'); await expect(iterations).toHaveAttribute('aria-valuetext', '100000 iterations');
   await page.setViewportSize({ width: 390, height: 844 });
   for (const label of ['Rate constraint (λ)', 'Training iterations']) {

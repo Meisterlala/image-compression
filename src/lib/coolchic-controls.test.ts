@@ -8,7 +8,9 @@ describe('Cool-chic nonlinear sliders', () => {
     expect(rateFromSlider(0)).toBe(0.000001);
     expect(rateFromSlider(100)).toBe(0.1);
     expect(rateFromSlider(rateToSlider(defaultSettings.coolchicLambda))).toBe(0.001);
-    expect(iterationsFromSlider(0)).toBe(2000);
+    expect(iterationsFromSlider(0)).toBe(100);
+    expect(iterationsFromSlider(1)).toBeGreaterThan(100);
+    expect(iterationsFromSlider(25)).toBe(2000);
     expect(iterationsFromSlider(100)).toBe(100000);
     expect(iterationsFromSlider(iterationsToSlider(defaultSettings.coolchicIterations))).toBe(2000);
   });
@@ -23,7 +25,7 @@ describe('Cool-chic nonlinear sliders', () => {
     }
   });
   it('round-trips real iteration values and clamps invalid persisted values', () => {
-    for (const iterations of [2000, 2100, 4000, 10000, 20000, 100000]) {
+    for (const iterations of [500, 501, 700, 1000, 1500, 1999, 2000, 2100, 4000, 10000, 20000, 100000]) {
       expect(iterationsFromSlider(iterationsToSlider(iterations))).toBe(iterations);
     }
     expect(rateFromSlider(-100)).toBe(0.000001);

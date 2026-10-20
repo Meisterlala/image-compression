@@ -2,11 +2,11 @@
 import init, { JpegAi, metrics } from './wasm/codec';
 import { loadCodec } from './lib/codecs';
 import { decodeJpegAi } from './lib/jpegai-decode';
-import type { Job, Result, WorkerMessage } from './types';
+import type { EncodeProgress, Job, Result, WorkerMessage } from './types';
 import { getCachedModel, loadManifest } from './lib/models';
 import { JPEG_AI_CONFIRM_THRESHOLD, JPEG_AI_MEMORY_LIMIT, MAX_PIXELS } from './lib/limits';
 
-const progress = (text: string) => self.postMessage({ type: 'progress', text } satisfies WorkerMessage);
+const progress = (text: string, info?: EncodeProgress) => self.postMessage({ type: 'progress', text, progress: info } satisfies WorkerMessage);
 let resume: (() => void) | undefined;
 self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
   if ('type' in data) {

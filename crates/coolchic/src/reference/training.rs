@@ -282,39 +282,29 @@ impl Trainer {
     pub fn total_iterations(&self) -> usize {
         self.preset.iterations
     }
+    /// Counts for the current major stage: training, then quantization search.
+    pub fn progress(&self) -> (usize, usize) {
+        self.search
+            .as_ref()
+            .map_or((self.completed, self.preset.iterations), |search| {
+                (search.tested, search.total)
+            })
+    }
     pub fn status(&self) -> String {
         if let Some(search) = &self.search {
             return if self.stage == Stage::Done {
                 "Writing the .cool bitstream…".to_string()
             } else {
-                format!(
-                    "Quantizing {} · {} / {} RD trials…",
-                    search.module(),
-                    search.tested,
-                    search.total
-                )
+                format!("Quantizing {}…", search.module())
             };
         }
-        let (label, total) = match self.stage {
-            Stage::Warm1 => (
-                format!("Warm-up 1/2 · candidate {}/5", self.candidate + 1),
-                self.preset.warmup.iterations,
-            ),
-            Stage::Warm2 => (
-                format!("Warm-up 2/2 · candidate {}/2", self.candidate + 1),
-                self.preset.warmup.iterations,
-            ),
-            Stage::Core => ("Training".to_string(), self.preset.core.iterations),
-            Stage::Hard => (
-                "Hard-round refinement".to_string(),
-                self.preset.hard.iterations,
-            ),
-            _ => ("Finishing".to_string(), 0),
-        };
-        format!(
-            "{label} · {} / {total} iterations…",
-            self.runner.as_ref().map_or(0, |r| r.iteration)
-        )
+        match self.stage {
+            Stage::Warm1 => format!("Warm-up 1/2 · candidate {}/5", self.candidate + 1),
+            Stage::Warm2 => format!("Warm-up 2/2 · candidate {}/2", self.candidate + 1),
+            Stage::Core => "Training".to_string(),
+            Stage::Hard => "Hard-round refinement".to_string(),
+            _ => "Finishing".to_string(),
+        }
     }
 
     pub fn step(&mut self) -> Result<bool> {
