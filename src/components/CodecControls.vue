@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Settings } from '../types';
+import { operatingPoints, type Settings } from '../types';
 import MetricTooltip from './MetricTooltip.vue';
 const settings = defineModel<Settings>({ required: true });
 defineProps<{ disabled: boolean }>();
@@ -7,18 +7,19 @@ const id = (field: string) => `${settings.value.format}-${field}`;
 </script>
 
 <template>
-  <fieldset class="settings-grid" :disabled="disabled">
+  <fieldset class="settings-grid" :class="{ 'jpegai-settings': settings.format === 'jpegai' }" :disabled="disabled">
     <legend class="sr-only">Encoding settings</legend>
     <template v-if="settings.format === 'jpegai'">
       <div class="field">
-        <label class="sr-only" :for="id('operating-point')">Operating point</label>
         <div class="field-heading">
-          <MetricTooltip label="Operating point" text="BOP (Base Operation Point) is the faster, lower-complexity option. HOP (High Operation Point) uses more complex neural transforms, aiming for better compression at similar quality, at the cost of slower decoding and higher memory use. Each uses its own model downloads; HOP is not guaranteed to produce a smaller file for every image or setting." />
+          <MetricTooltip label="Operating point" text="SOP — Simple Operation Point: the lightest decoder, useful for fast previews or resource-constrained devices; reconstruction quality can be lower. BOP — Base Operation Point: the balanced default for general-purpose use. HOP — High Operation Point: higher-complexity transforms for compression-priority work, at the cost of slower decoding and higher memory use. Better compression is an aim, not a guarantee for every image. Each point uses its own model downloads; only Download fetches weights." />
         </div>
-        <select :id="id('operating-point')" v-model="settings.operatingPoint">
-          <option value="bop">BOP · Faster</option>
-          <option value="hop">HOP · Higher complexity</option>
-        </select>
+        <div class="point-options" role="radiogroup" aria-label="Operating point">
+          <label v-for="point in operatingPoints" :key="point.id" class="point-choice" :class="{ selected: settings.operatingPoint === point.id }">
+            <input v-model="settings.operatingPoint" class="sr-only" type="radio" :name="id('operating-point')" :value="point.id">
+            <span>{{ point.label }}</span>
+          </label>
+        </div>
       </div>
       <div class="field">
         <label :for="id('rate-mode')">Model selection</label>
@@ -89,9 +90,67 @@ const id = (field: string) => `${settings.value.format}-${field}`;
 .field-heading {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 8px;
+  min-height: 20px;
   margin-bottom: 8px;
   font-size: 12px;
+  line-height: 20px;
+}
+
+.field-heading :deep(.metric-help) {
+  display: inline-flex;
+}
+
+.field-heading :deep(button) {
+  padding: 0;
+  border-bottom: 0;
+  color: var(--ink);
+  text-decoration: underline dotted var(--muted);
+  text-underline-offset: 4px;
+}
+
+.point-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  height: 56px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.point-choice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 8px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.point-choice + .point-choice {
+  border-left: 1px solid var(--line);
+}
+
+.point-choice.selected {
+  font-weight: 600;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.point-choice:has(input:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+fieldset:disabled .point-choice {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .full-width {
@@ -115,10 +174,15 @@ select {
   width: 100%;
   padding: 10px 8px;
   font-size: 12px;
+  line-height: 20px;
   color: var(--ink);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
+}
+
+.jpegai-settings select {
+  height: 56px;
 }
 
 input[type="range"] {
@@ -150,6 +214,12 @@ input[type="range"] {
 
 input[type="checkbox"] {
   accent-color: var(--accent);
+}
+
+@container (max-width: 600px) {
+  .jpegai-settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @container (max-width: 400px) {

@@ -2,7 +2,7 @@
 import init, { JpegAi, metrics } from './wasm/codec';
 import { loadCodec } from './lib/codecs';
 import type { Job, Result, WorkerMessage } from './types';
-import { getModel, loadManifest } from './lib/models';
+import { getCachedModel, loadManifest } from './lib/models';
 import { JPEG_AI_CONFIRM_THRESHOLD, JPEG_AI_MEMORY_LIMIT, MAX_PIXELS } from './lib/limits';
 
 const progress = (text: string) => self.postMessage({ type: 'progress', text } satisfies WorkerMessage);
@@ -49,9 +49,9 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
       const entries = s.rateMode === 'target' ? manifest.models : manifest.models.filter(m => m.id === s.model);
       if (entries.length !== (s.rateMode === 'target' ? 4 : 1)) throw new Error('Incomplete JPEG AI model manifest');
       for (const entry of entries) {
-        progress(`Loading JPEG AI ${point} model ${entry.id + 1} · ${(entry.bytes / 1048576).toFixed(1)} MiB (cached after first use)…`);
-        const { bytes } = await getModel(entry, (received, total) => {
-          progress(`Loading model ${entry.id + 1} · ${Math.round(received / total * 100)}% (download or local cache)…`);
+        progress(`Reading cached JPEG AI ${point} model ${entry.id + 1} · ${(entry.bytes / 1048576).toFixed(1)} MiB…`);
+        const { bytes } = await getCachedModel(entry, (received, total) => {
+          progress(`Reading cached model ${entry.id + 1} · ${Math.round(received / total * 100)}%…`);
         });
         notices.push(ai.addModels(bytes)); modelSize += bytes.length;
       }

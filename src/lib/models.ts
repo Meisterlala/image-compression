@@ -12,8 +12,8 @@ function modelUrl(entry: ModelEntry) {
 }
 
 export async function loadManifest(operatingPoint: OperatingPoint = 'bop'): Promise<ModelManifest> {
-  if (operatingPoint !== 'bop' && operatingPoint !== 'hop') throw new Error('Invalid JPEG AI operating point');
-  const file = operatingPoint === 'bop' ? 'manifest.json' : 'manifest-hop.json';
+  if (operatingPoint !== 'sop' && operatingPoint !== 'bop' && operatingPoint !== 'hop') throw new Error('Invalid JPEG AI operating point');
+  const file = operatingPoint === 'bop' ? 'manifest.json' : `manifest-${operatingPoint}.json`;
   const response = await fetch(`${import.meta.env.BASE_URL}models/${file}`, { cache: 'no-cache' });
   if (!response.ok || !response.headers.get('content-type')?.includes('json')) {
     throw new Error('JPEG AI models are missing. Run npm run models, then rebuild the static site.');
@@ -43,14 +43,24 @@ export async function removeModel(entry: ModelEntry) {
   await cache.delete(modelUrl(entry));
 }
 
+/** Workers never download implicitly: only the UI's Download action may fetch weights. */
+export function getCachedModel(entry: ModelEntry, onProgress?: (received: number, total: number) => void) {
+  return getModel(entry, onProgress, undefined, true);
+}
+
 /** The library and WASM worker share the same content-addressed, verified cache. */
-export async function getModel(entry: ModelEntry, onProgress?: (received: number, total: number) => void, signal?: AbortSignal): Promise<{ bytes: Uint8Array<ArrayBuffer>; persisted: boolean }> {
+export async function getModel(entry: ModelEntry, onProgress?: (received: number, total: number) => void, signal?: AbortSignal, cacheOnly = false): Promise<{ bytes: Uint8Array<ArrayBuffer>; persisted: boolean }> {
   let cache: Cache | undefined;
   try { cache = await caches.open(MODEL_CACHE); } catch { /* Direct use still works. */ }
   const key = modelUrl(entry);
   let response = await cache?.match(key);
+  if (response && response.headers.get('X-Model-SHA256') !== entry.sha256) {
+    await cache?.delete(key);
+    response = undefined;
+  }
   const fromCache = !!response;
   if (!response) {
+    if (cacheOnly) throw new Error(`Download ${entry.file.split('-')[0]!.toUpperCase()} model ${entry.id + 1} using its Download button before encoding.`);
     response = await fetch(key, { signal });
     if (!response.ok) throw new Error(`Model download failed (${response.status}). Run npm run models before serving the site.`);
   }

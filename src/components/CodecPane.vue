@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import CodecControls from './CodecControls.vue';
 import ModelLibrary from './ModelLibrary.vue';
 import ResultDownloads from './ResultDownloads.vue';
-import { formats, type Result, type Settings } from '../types';
+import { formats, type OperatingPoint, type Result, type Settings } from '../types';
 import type { PaneStatus } from '../lib/comparisons';
 
 const settings = defineModel<Settings>({ required: true });
@@ -16,14 +16,15 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ encode: []; confirm: []; cancel: [] }>();
 const modelBusy = ref(false);
+const modelsReady = ref(false);
 const format = computed(() => formats.find(format => format.id === settings.value.format)!);
 const working = computed(() => props.status.phase === 'running' || props.status.phase === 'queued' || props.status.phase === 'confirming');
 const changed = computed(() => !!props.result && (
   props.source?.width !== props.result.width || props.source?.height !== props.result.height ||
   JSON.stringify(settings.value) !== JSON.stringify(props.result.settings)
 ));
-function selectModel(id: number) {
-  settings.value = { ...settings.value, model: id, rateMode: 'model' };
+function selectModel(operatingPoint: OperatingPoint, id: number) {
+  settings.value = { ...settings.value, operatingPoint, model: id, rateMode: 'model' };
 }
 </script>
 
@@ -36,13 +37,14 @@ function selectModel(id: number) {
       <CodecControls v-model="settings" :disabled="working || importing" />
       <ModelLibrary
         v-if="format.id === 'jpegai'"
-        :key="settings.operatingPoint"
         :operating-point="settings.operatingPoint"
+        :rate-mode="settings.rateMode"
         :selected="settings.model"
         :disabled="working || importing"
-        :refresh-key="result"
+        :refresh-key="status.phase"
         @use="selectModel"
         @busy="modelBusy = $event"
+        @ready="modelsReady = $event"
       />
     </section>
     <p v-if="status.error" class="error" role="alert">{{ status.error }}</p>
@@ -59,7 +61,8 @@ function selectModel(id: number) {
       </div>
       <template v-else>
         <button v-if="working" class="cancel-button" @click="emit('cancel')">{{ status.phase === 'queued' ? 'Cancel queued job' : 'Cancel encoding' }}</button>
-        <button v-else class="encode-button" :disabled="!source || importing || modelBusy" @click="emit('encode')">{{ result ? 'Encode again' : 'Encode' }}</button>
+        <button v-else class="encode-button" :disabled="!source || importing || modelBusy || (format.id === 'jpegai' && !modelsReady)" @click="emit('encode')">{{ result ? 'Encode again' : 'Encode' }}</button>
+        <p v-if="source && format.id === 'jpegai' && !modelsReady && !modelBusy && !working" class="pane-status">{{ settings.rateMode === 'target' ? 'Download all four models to use automatic model selection.' : 'Download the selected model before encoding.' }}</p>
         <p v-if="working" class="pane-status" role="status" aria-live="polite">{{ status.message }}</p>
       </template>
     </div>

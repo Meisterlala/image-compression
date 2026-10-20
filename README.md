@@ -19,9 +19,9 @@ npm run dev
 ```
 
 Open http://localhost:5173. Initial model preparation downloads pinned reference
-checkpoints at build time (~430 MiB), validates their LFS SHA-256 hashes, and packs
-**encoder and decoder tensors**. No Python/PyTorch is needed. The resulting eight
-bundles total ~322 MiB (four BOP at ~26 MiB each, four HOP at ~54 MiB each). Raw checkpoints remain in `.cache/`; model bundles and
+checkpoints at build time (~440 MiB), validates their LFS SHA-256 hashes, and packs
+**encoder and decoder tensors**. No Python/PyTorch is needed. The resulting twelve
+bundles total ~420 MiB (four SOP at ~25 MiB, four BOP at ~26 MiB, four HOP at ~54 MiB each). Raw checkpoints remain in `.cache/`; model bundles and
 WASM are generated, not committed. The manifests and dependency lockfiles are committed.
 
 `npm run models` is required for JPEG AI, not JPEG/AVIF/JPEG XL/Cool-chic. Missing assets
@@ -67,15 +67,21 @@ modifying or redistributing it. External library and model terms also apply.
   original file again, rather than repeatedly resizing an already reduced image.
   Size changes retain each codec's latest result and encode-time reference metadata. Only selecting
   a new source clears results. Rows show each result's dimensions so mixed sizes are clear.
-- JPEG AI: BOP/HOP Operating point selector with a hover/focus/tap explanation.
-  BOP is the faster default; HOP uses higher-complexity transforms, aiming for better
-  compression at the cost of slower decoding and more memory. Both offer four models,
+- JPEG AI: three-way Operating point control with full names only. Its hover/focus/tap
+  tooltip explains each point's trade-offs and use cases. Simple Operation Point (SOP)
+  uses the lightest decoder, useful for previews/resource-limited devices with potentially
+  lower fidelity; Base Operation Point (BOP) is the balanced default; High Operation Point
+  (HOP) prioritises compression efficiency over decode speed and memory. All offer four models,
   adjustable quantisation and actual target-bpp search within the selected operating point.
   Changing point retains the last output until the next encode; its table row and
   download filename identify the point actually encoded. There is still one result per codec.
-- Four compact JPEG AI model cards for the selected operating point. Selecting a model downloads it into Cache Storage;
-  each card has a Download/Remove action and cached-state color. Verification remains
-  internal; there is no model file export/import or checksum display.
+- Desktop shows all twelve compact model cards as three stacked rows of four; mobile
+  shows the current group (plus an in-progress download so Cancel remains accessible).
+  Cards show actual file sizes, selection and cached state. Selecting a card only selects
+  its operating point and model. Only Download fetches weights; encoding is cache-only
+  and remains disabled until the selected model (or all four in automatic mode) is ready.
+  Downloading a different card does not change the selection. Cards support Remove and
+  Cancel; integrity verification stays internal, with no model file export/import.
 - JPEG: quality, progressive mode and chroma subsampling (MozJPEG).
 - AVIF: quality, effort, lossless and chroma subsampling (jSquash/libavif).
 - JPEG XL: quality, effort, lossless and progressive encoding (jSquash/libjxl).
@@ -143,7 +149,7 @@ crates/coolchic/             self-contained CPU-only reduced Cool-chic 5.0 profi
 src/lib/coolchic.ts          lazy worker-side WASM adapter and training progress
 src/wasm-coolchic/           generated separate Cool-chic WASM module
 scripts/                    WASM/model preparation and source archive
-public/models/manifest*.json pinned BOP/HOP weights and integrity metadata
+public/models/manifest*.json pinned SOP/BOP/HOP weights and integrity metadata
 ```
 
 The JPEG AI implementation is pinned to zenjpegai commit
@@ -189,7 +195,7 @@ against `dist/` using Vite preview. It does not certify JPEG AI conformance.
   not silently resize it. Downscale selection is explicit.
   Browser decoding can allocate before the source-size check; not hardened against
   hostile decompression bombs. Use a smaller source on memory-constrained devices.
-- JPEG AI is CPU-only BOP/HOP, advanced optional coding tools off. No WebGPU or hidden
+- JPEG AI is CPU-only SOP/BOP/HOP, advanced optional coding tools off. No WebGPU or hidden
   server fallback. Modern browsers with WASM SIMD are required for this build.
 - JPEG AI's encode working-set cap is 3072 MiB (3 GiB), with the same decoder cap.
   HOP preflight also covers a conservative synthesis bound plus retained models, and
@@ -210,8 +216,9 @@ against `dist/` using Vite preview. It does not certify JPEG AI conformance.
 - SSIM: Rec.709 luma, non-overlapping 8x8 windows (including smaller edges), population
   variance, K1=.01/K2=.03/L=255. Not MS-SSIM. PSNR uses RGB MSE, with `null` in JSON
   for infinite PSNR. These scores do not establish perceptual equivalence.
-- Model storage may be evicted, denied or out of quota. Compression still works
-  by downloading weights directly if caching fails.
+- JPEG AI requires browser Cache Storage for explicitly downloaded models. If storage
+  is evicted, denied or full, use Download again or allow browser storage; workers never
+  fall back to implicit downloads. The other codecs do not require these model downloads.
 - `.jai` is an experimental extension; downloading one does not make browsers support it.
 - No standardized reference-decoder interoperability or performance promise is made
   by the UI tests. Keep upstream conformance and patent review separate from UI validation.

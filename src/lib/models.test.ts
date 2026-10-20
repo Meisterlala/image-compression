@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadManifest, type ModelManifest } from './models';
+import { getCachedModel, loadManifest, type ModelManifest } from './models';
 import type { OperatingPoint } from '../types';
 
 function manifest(op: OperatingPoint): ModelManifest {
@@ -25,6 +25,11 @@ describe('operating-point model manifests', () => {
     expect(await loadManifest('hop')).toEqual(data);
     expect(fetcher.mock.calls[0]![0]).toMatch(/\/models\/manifest-hop\.json$/);
   });
+  it('loads the SOP manifest separately from its shared BOP analysis weights', async () => {
+    const data = manifest('sop'); const fetcher = serve(data);
+    expect(await loadManifest('sop')).toEqual(data);
+    expect(fetcher.mock.calls[0]![0]).toMatch(/\/models\/manifest-sop\.json$/);
+  });
   it('rejects a different point rather than silently falling back', async () => {
     serve(manifest('bop'));
     await expect(loadManifest('hop')).rejects.toThrow('Invalid JPEG AI model manifest');
@@ -38,5 +43,24 @@ describe('operating-point model manifests', () => {
       serve(data);
       await expect(loadManifest('hop')).rejects.toThrow('Invalid JPEG AI model manifest');
     }
+  });
+});
+
+describe('explicit model downloads', () => {
+  it('never fetches a missing model while encoding, for either operating point', async () => {
+    vi.stubGlobal('location', new URL('http://localhost/'));
+    vi.stubGlobal('caches', { open: vi.fn().mockResolvedValue({ match: vi.fn().mockResolvedValue(undefined) }) });
+    const fetcher = serve(null);
+    for (const op of ['sop', 'bop', 'hop'] as const) {
+      await expect(getCachedModel(manifest(op).models[0]!)).rejects.toThrow(`Download ${op.toUpperCase()} model 1`);
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('does not fall back to a download when browser storage is unavailable', async () => {
+    vi.stubGlobal('location', new URL('http://localhost/'));
+    vi.stubGlobal('caches', undefined);
+    const fetcher = serve(null);
+    await expect(getCachedModel(manifest('hop').models[0]!)).rejects.toThrow('Download HOP model 1');
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

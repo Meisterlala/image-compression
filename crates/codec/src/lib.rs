@@ -73,7 +73,7 @@ impl JpegAi {
         store.add(bundle).map_err(error)?;
         Ok(store.notice().to_owned())
     }
-    /// Selected BOP/HOP model with quantisation, or target-bpp search within that point.
+    /// Selected SOP/BOP/HOP model with quantisation, or target-bpp search within that point.
     pub fn encode(
         &self,
         rgba: &[u8],
@@ -146,9 +146,10 @@ impl Default for JpegAi {
 
 fn parse_operating_point(value: &str) -> Result<OperatingPoint, &'static str> {
     match value {
+        "sop" => Ok(OperatingPoint::Sop),
         "bop" => Ok(OperatingPoint::Bop),
         "hop" => Ok(OperatingPoint::Hop),
-        _ => Err("JPEG AI operating point must be bop or hop"),
+        _ => Err("JPEG AI operating point must be sop, bop or hop"),
     }
 }
 
@@ -297,7 +298,8 @@ mod tests {
     fn operating_points_and_hop_memory_are_explicit() {
         assert_eq!(parse_operating_point("bop"), Ok(OperatingPoint::Bop));
         assert_eq!(parse_operating_point("hop"), Ok(OperatingPoint::Hop));
-        assert!(parse_operating_point("sop").is_err());
+        assert_eq!(parse_operating_point("sop"), Ok(OperatingPoint::Sop));
+        assert!(parse_operating_point("invalid").is_err());
         let bop = estimate_job_memory(1024, 1024, OperatingPoint::Bop, false);
         let hop = estimate_job_memory(1024, 1024, OperatingPoint::Hop, false);
         let analysis =

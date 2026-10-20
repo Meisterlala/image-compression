@@ -1,7 +1,12 @@
-export type OperatingPoint = 'bop' | 'hop';
+export type OperatingPoint = 'sop' | 'bop' | 'hop';
+export const operatingPoints: { id: OperatingPoint; label: string }[] = [
+  { id: 'sop', label: 'Simple Operation Point' },
+  { id: 'bop', label: 'Base Operation Point' },
+  { id: 'hop', label: 'High Operation Point' },
+];
 export type Format = 'jpegai' | 'jpeg' | 'avif' | 'jxl' | 'coolchic';
 export const formats: { id: Format; label: string; extension: string; mime: string; description: string }[] = [
-  { id: 'jpegai', label: 'JPEG AI', extension: 'jai', mime: 'application/octet-stream', description: 'zenjpegai · BOP / HOP · experimental' },
+  { id: 'jpegai', label: 'JPEG AI', extension: 'jai', mime: 'application/octet-stream', description: 'zenjpegai · SOP / BOP / HOP · experimental' },
   { id: 'jpeg', label: 'JPEG', extension: 'jpg', mime: 'image/jpeg', description: 'MozJPEG' },
   { id: 'avif', label: 'AVIF', extension: 'avif', mime: 'image/avif', description: 'libavif / libaom' },
   { id: 'jxl', label: 'JPEG XL', extension: 'jxl', mime: 'image/jxl', description: 'libjxl' },

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
 // A production build must not silently omit the main codec's weights.
-for (const [op, file] of [['bop', 'manifest.json'], ['hop', 'manifest-hop.json']]) {
+for (const [op, file] of [['sop', 'manifest-sop.json'], ['bop', 'manifest.json'], ['hop', 'manifest-hop.json']]) {
   const manifest = JSON.parse(await readFile(`public/models/${file}`, 'utf8'));
   if (manifest.operatingPoint !== op || !Array.isArray(manifest.models) || manifest.models.length !== 4 ||
       manifest.models.some((model, id) => model.id !== id || model.file !== `${op}-m${id}.zjb`)) {
@@ -23,7 +23,7 @@ const args = [
   '--exclude=src/wasm',
   '--exclude=src/wasm-coolchic',
   'src', 'crates', 'scripts', 'tests', 'deploy', 'public/legal',
-  'public/models/manifest.json', 'public/models/manifest-hop.json', 'index.html', 'package.json', 'package-lock.json',
+  'public/models/manifest.json', 'public/models/manifest-hop.json', 'public/models/manifest-sop.json', 'index.html', 'package.json', 'package-lock.json',
   'tsconfig.json', 'vite.config.ts', 'playwright.config.ts',
   'Dockerfile', '.dockerignore', '.gitignore', 'LICENSE', 'README.md',
 ];

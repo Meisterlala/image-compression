@@ -21,11 +21,12 @@ if (run('git', ['-C', cache, 'rev-parse', 'HEAD'], true).trim() !== revision) {
 }
 run('cargo', ['build', '--release', '--manifest-path', 'crates/codec/Cargo.toml', '--features', 'model-packer', '--bin', 'pack-models']);
 const betas = ['0.002', '0.012', '0.075', '0.5'];
-for (const op of ['bop', 'hop']) {
+for (const op of ['sop', 'bop', 'hop']) {
   const models = [];
   for (let id = 0; id < 4; id++) {
     const beta = betas[id];
-    const paths = ['Y', 'UV'].flatMap(c => [`VM_common_int/${c}_${beta}.pth`, `VM_${op}/encoder_${c}_${beta}.pth`, `VM_${op}/decoder_${c}_${beta}.pth`]);
+    const analysis = op === 'sop' ? 'bop' : op;
+    const paths = ['Y', 'UV'].flatMap(c => [`VM_common_int/${c}_${beta}.pth`, `VM_${analysis}/encoder_${c}_${beta}.pth`, `VM_${op}/decoder_${c}_${beta}.pth`]);
     await Promise.all(paths.map(async path => {
       const pointer = run('git', ['-C', cache, 'show', `${revision}:models/${path}`], true);
       const sha = /oid sha256:([a-f0-9]{64})/.exec(pointer)?.[1];
@@ -50,6 +51,6 @@ for (const op of ['bop', 'hop']) {
     const bytes = await readFile(`${output}/${file}`);
     models.push({ id, file, bytes: bytes.length, sha256: hash(bytes) });
   }
-  await writeFile(`${output}/${op === 'bop' ? 'manifest' : 'manifest-hop'}.json`, JSON.stringify({ revision, operatingPoint: op, models }, null, 2) + '\n');
+  await writeFile(`${output}/${op === 'bop' ? 'manifest' : `manifest-${op}`}.json`, JSON.stringify({ revision, operatingPoint: op, models }, null, 2) + '\n');
 }
 console.log('All encoder + decoder bundles ready. Serve public/models with the site.');
