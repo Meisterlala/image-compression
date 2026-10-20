@@ -2,6 +2,7 @@ node_modules/
 dist/
 src/wasm/
 crates/codec/target/
+crates/coolchic/target/
 .cache/
 public/models/*.zjb
 public/source.tar.gz
