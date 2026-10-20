@@ -78,7 +78,7 @@ fn expand_backward(input: &Tensor, gradient: &Tensor, allow_identity: bool) -> R
 // States of fixed_upsampling on the suffix AFTER the requested latent. Its
 // final result is one resolution lower than the current latent. Empty suffix
 // uses the reference's dummy all-zero single-channel feature.
-fn coarse_states(latents: &[Tensor], index: usize) -> Result<Vec<Tensor>> {
+pub(crate) fn coarse_states(latents: &[Tensor], index: usize) -> Result<Vec<Tensor>> {
     if index >= latents.len() || latents.iter().any(|l| l.channels != 1) {
         return Err(Error("Invalid reference IFCE latent list"));
     }

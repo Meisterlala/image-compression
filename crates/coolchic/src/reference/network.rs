@@ -158,6 +158,11 @@ fn add_arm(target: &mut ArmGradient, source: &ArmGradient) {
 impl Network {
     pub fn new(architecture: Architecture, rng: &mut Random) -> Result<Self> {
         architecture.validate()?;
+        if architecture.estimated_working_bytes(false) > 3 * 1024 * 1024 * 1024 {
+            return Err(Error(
+                "Cool-chic reference reconstruction exceeds the 3 GiB browser memory budget. Choose a smaller Downscale image size.",
+            ));
+        }
         let specs = architecture.latent_specs();
         let latents = specs
             .iter()
@@ -291,6 +296,45 @@ impl Network {
         Ok(())
     }
 
+    fn reconstruction(&self, quantized: &[Tensor]) -> Result<(Tensor, Tensor, Tensor, Tensor)> {
+        let arch = &self.architecture;
+        let specs = arch.latent_specs();
+        if quantized.len() != specs.len()
+            || quantized
+                .iter()
+                .zip(&specs)
+                .any(|(q, s)| q.channels != 1 || q.height != s.height || q.width != s.width)
+        {
+            return Err(Error("Invalid reference reconstruction latent dimensions"));
+        }
+        let synthesis_latents: Vec<_> = quantized
+            .iter()
+            .zip(&specs)
+            .filter(|(_, s)| !s.hyper)
+            .map(|(q, _)| q.clone())
+            .collect();
+        let dense = self.pyramid.forward(&synthesis_latents)?;
+        let synthesis_input = if arch.common_randomness {
+            let common = fixed_pyramid(&self.common)?;
+            let common = resize(
+                &common,
+                arch.height,
+                arch.width,
+                super::architecture::Interpolation::Bicubic,
+            )?;
+            dense.concat(&common)?
+        } else {
+            dense.clone()
+        };
+        let native = self.synthesis.forward(&synthesis_input)?;
+        let raw = resize(&native, arch.height, arch.width, arch.interpolation)?;
+        Ok((dense, synthesis_input, native, raw))
+    }
+
+    pub fn reconstruct(&self, quantized: &[Tensor]) -> Result<Tensor> {
+        Ok(self.reconstruction(quantized)?.3)
+    }
+
     fn tape(
         &self,
         target: &Tensor,
@@ -341,28 +385,7 @@ impl Network {
             contexts.push(context);
             raw_arms.push(raw);
         }
-        let specs = arch.latent_specs();
-        let synthesis_latents: Vec<_> = quantized
-            .iter()
-            .zip(&specs)
-            .filter(|(_, spec)| !spec.hyper)
-            .map(|(q, _)| q.clone())
-            .collect();
-        let dense = self.pyramid.forward(&synthesis_latents)?;
-        let synthesis_input = if arch.common_randomness {
-            let common = fixed_pyramid(&self.common)?;
-            let common = resize(
-                &common,
-                arch.height,
-                arch.width,
-                super::architecture::Interpolation::Bicubic,
-            )?;
-            dense.concat(&common)?
-        } else {
-            dense.clone()
-        };
-        let native = self.synthesis.forward(&synthesis_input)?;
-        let raw = resize(&native, arch.height, arch.width, arch.interpolation)?;
+        let (dense, synthesis_input, native, raw) = self.reconstruction(&quantized)?;
         let mut image = raw.clone();
         for v in &mut image.data {
             *v = v.clamp(0.0, 1.0);

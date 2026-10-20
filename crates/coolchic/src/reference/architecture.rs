@@ -152,10 +152,41 @@ impl Architecture {
             }
             inputs = layer.outputs;
         }
-        if self.latent_specs().len() > 31 {
+        let specs = self.latent_specs();
+        if specs
+            .windows(2)
+            .any(|s| s[0].height > s[1].height * 2 || s[0].width > s[1].width * 2)
+        {
+            return Err(Error(
+                "Reference latent hierarchy contains unsupported resolution gaps",
+            ));
+        }
+        if specs.len() > 31 {
             return Err(Error("Too many reference latent grids"));
         }
         Ok(())
+    }
+
+    /// Conservative live-buffer estimate for browser guardrails, not a claim
+    /// about measured process RSS. Call only after validating this descriptor.
+    pub fn estimated_working_bytes(&self, training: bool) -> u64 {
+        let pixels = (self.width * self.height) as u64;
+        let outputs: usize = self.synthesis.iter().map(|l| l.outputs).sum();
+        let contexts = self.spatial_context + self.ifce_outputs;
+        let channels = 2 * outputs
+            + 2 * self.synthesis_inputs()
+            + 12
+            + if training {
+                3 * contexts * (self.arm_hidden + 1) + 4 * self.ifce_outputs + 20
+            } else {
+                2 * self.ifce_outputs
+            };
+        let latent_values: u64 = self
+            .latent_specs()
+            .iter()
+            .map(|s| (s.width * s.height) as u64)
+            .sum();
+        pixels * channels as u64 * 4 + latent_values * if training { 40 } else { 8 }
     }
 
     pub fn synthesis_inputs(&self) -> usize {

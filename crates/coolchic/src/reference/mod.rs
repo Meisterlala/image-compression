@@ -6,7 +6,9 @@
 
 pub mod architecture;
 pub mod arm;
+pub mod codec;
 pub mod convolution;
+pub mod fixed;
 pub mod inter_feature;
 pub mod network;
 pub mod parameters;
@@ -16,6 +18,7 @@ pub mod random;
 pub mod rate;
 pub mod resize;
 pub mod soap;
+pub mod stream;
 pub mod tensor;
 pub mod upsampling;
 

@@ -77,7 +77,7 @@ const PRIORITIES: [usize; 40] = [
     14, 19, 27, 24, 13, 8, 2, 1, 3, 11, 17, 26, 16, 7, 4, 0,
 ];
 
-fn neighbours(count: usize) -> Result<Vec<(isize, isize)>> {
+pub(crate) fn neighbours(count: usize) -> Result<Vec<(isize, isize)>> {
     if count > PRIORITIES.len() {
         return Err(Error("Invalid reference spatial context count"));
     }

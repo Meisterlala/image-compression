@@ -11,7 +11,7 @@ use constriction::stream::{
 };
 use probability::distribution::Laplace;
 
-fn visit(width: usize, height: usize, mut f: impl FnMut(usize, usize) -> Result<()>) -> Result<()> {
+pub(crate) fn visit(width: usize, height: usize, mut f: impl FnMut(usize, usize) -> Result<()>) -> Result<()> {
     if width <= 9 {
         for y in 0..height {
             for x in 0..width {

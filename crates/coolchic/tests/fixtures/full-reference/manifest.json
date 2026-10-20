@@ -1,0 +1,40 @@
+{
+  "upstream_revision": "a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6",
+  "cases": [
+    {
+      "name": "lop",
+      "width": 13,
+      "height": 7
+    },
+    {
+      "name": "mop",
+      "width": 13,
+      "height": 7
+    },
+    {
+      "name": "hop",
+      "width": 13,
+      "height": 7
+    },
+    {
+      "name": "vhop",
+      "width": 13,
+      "height": 7
+    },
+    {
+      "name": "common",
+      "width": 13,
+      "height": 7
+    },
+    {
+      "name": "resize",
+      "width": 13,
+      "height": 7
+    },
+    {
+      "name": "linear",
+      "width": 13,
+      "height": 7
+    }
+  ]
+}
