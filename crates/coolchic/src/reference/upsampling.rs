@@ -77,34 +77,48 @@ impl Filter {
             .checked_mul(if horizontal { factor } else { 1 })
             .ok_or(Error("Reference upsampling dimensions overflow"))?;
         let mut output = Tensor::zeros(input.channels, height, width)?;
-        for channel in 0..input.channels {
-            for y in 0..height {
-                for x in 0..width {
-                    let mut sum = 0.0;
-                    for k in 0..self.kernel {
-                        let position = self.source(
-                            if horizontal { x } else { y },
-                            k,
-                            if horizontal {
-                                input.width
-                            } else {
-                                input.height
-                            },
+        let row = |index: usize, values: &mut [f32]| {
+            let channel = index / height;
+            let y = index % height;
+            for (x, value) in values.iter_mut().enumerate() {
+                let mut sum = 0.0;
+                for k in 0..self.kernel {
+                    let position = self.source(
+                        if horizontal { x } else { y },
+                        k,
+                        if horizontal {
+                            input.width
+                        } else {
+                            input.height
+                        },
+                    );
+                    if let Some(position) = position {
+                        let i = input.index(
+                            channel,
+                            if horizontal { y } else { position },
+                            if horizontal { position } else { x },
                         );
-                        if let Some(position) = position {
-                            let i = input.index(
-                                channel,
-                                if horizontal { y } else { position },
-                                if horizontal { position } else { x },
-                            );
-                            sum += input.data[i] * self.half[self.half_index(k)];
-                        }
+                        sum += input.data[i] * self.half[self.half_index(k)];
                     }
-                    let index = output.index(channel, y, x);
-                    output.data[index] = sum;
                 }
+                *value = sum;
             }
+        };
+        #[cfg(feature = "parallel")]
+        if super::parallel::worthwhile(output.data.len() * self.kernel) {
+            use rayon::prelude::*;
+            output
+                .data
+                .par_chunks_mut(width)
+                .enumerate()
+                .for_each(|(i, values)| row(i, values));
+            return Ok(output);
         }
+        output
+            .data
+            .chunks_mut(width)
+            .enumerate()
+            .for_each(|(i, values)| row(i, values));
         Ok(output)
     }
 
@@ -114,6 +128,10 @@ impl Filter {
         gradient: &Tensor,
         horizontal: bool,
     ) -> Result<FilterGradient> {
+        #[cfg(feature = "parallel")]
+        if super::parallel::worthwhile(gradient.data.len() * self.kernel) {
+            return self.parallel_axis_backward(input, gradient, horizontal);
+        }
         let mut result = FilterGradient {
             input: Tensor::zeros(input.channels, input.height, input.width)?,
             half: vec![0.0; self.half.len()],
@@ -144,6 +162,93 @@ impl Filter {
                         }
                     }
                 }
+            }
+        }
+        Ok(result)
+    }
+
+    #[cfg(feature = "parallel")]
+    fn parallel_axis_backward(
+        &self,
+        input: &Tensor,
+        gradient: &Tensor,
+        horizontal: bool,
+    ) -> Result<FilterGradient> {
+        use rayon::prelude::*;
+        // Independent rows/columns own their input gradients. Collect in raster
+        // order for deterministic filter-gradient reduction, never float atomics.
+        let lines = input.channels
+            * if horizontal {
+                input.height
+            } else {
+                input.width
+            };
+        let size = if horizontal {
+            input.width
+        } else {
+            input.height
+        };
+        let targets = if horizontal {
+            gradient.width
+        } else {
+            gradient.height
+        };
+        let parts: Vec<_> = (0..lines)
+            .into_par_iter()
+            .map(|line| {
+                let c = line
+                    / if horizontal {
+                        input.height
+                    } else {
+                        input.width
+                    };
+                let fixed = line
+                    % if horizontal {
+                        input.height
+                    } else {
+                        input.width
+                    };
+                let mut values = vec![0.0; size];
+                let mut half = vec![0.0; self.half.len()];
+                for target in 0..targets {
+                    let g = gradient.data[gradient.index(
+                        c,
+                        if horizontal { fixed } else { target },
+                        if horizontal { target } else { fixed },
+                    )];
+                    for k in 0..self.kernel {
+                        if let Some(position) = self.source(target, k, size) {
+                            let ki = self.half_index(k);
+                            values[position] += g * self.half[ki];
+                            let i = input.index(
+                                c,
+                                if horizontal { fixed } else { position },
+                                if horizontal { position } else { fixed },
+                            );
+                            half[ki] += g * input.data[i];
+                        }
+                    }
+                }
+                (values, half)
+            })
+            .collect();
+        let mut result = FilterGradient {
+            input: Tensor::zeros(input.channels, input.height, input.width)?,
+            half: vec![0.0; self.half.len()],
+        };
+        for (line, (values, half)) in parts.into_iter().enumerate() {
+            if horizontal {
+                result.input.data[line * input.width..(line + 1) * input.width]
+                    .copy_from_slice(&values);
+            } else {
+                let c = line / input.width;
+                let x = line % input.width;
+                for (y, value) in values.into_iter().enumerate() {
+                    result.input.data[(c * input.height + y) * input.width + x] = value;
+                }
+            }
+            for (a, b) in result.half.iter_mut().zip(half) {
+                *a += b;
             }
         }
         Ok(result)

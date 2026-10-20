@@ -79,6 +79,9 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
     </div>
     <p v-if="result?.decodeBackend" class="pane-status" :data-decode-backend="result.decodeBackend">Preview decoded with {{ result.decodeBackend === 'webgpu' ? 'WebGPU' : 'CPU' }} · Encoding uses CPU.</p>
     <p v-if="result?.decodeWarning" class="gpu-warning" role="status" :title="result.decodeWarning">WebGPU unavailable — decoded on CPU.</p>
+    <section v-if="result?.settings.format === 'coolchic' && result.notices.length" aria-label="Training backend" class="training-backend">
+      <p v-for="notice in result.notices" :key="notice" class="pane-status">{{ notice }}</p>
+    </section>
     <ResultDownloads v-if="result" :result="result" :file="file" />
   </section>
 </template>

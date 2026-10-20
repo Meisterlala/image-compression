@@ -16,6 +16,19 @@ async function upload(page: Page, width = 96, height = 64) {
   await expect(page.getByRole('region', { name: 'Image input', exact: true })).toHaveAttribute('data-width', String(width));
 }
 
+async function savedAcceleration(page: Page, gpu: boolean) {
+  await expect.poll(() => page.evaluate(() => new Promise(resolve => {
+    const request = indexedDB.open('image-compression-state', 1);
+    request.onsuccess = () => {
+      const database = request.result;
+      const get = database.transaction('state', 'readonly').objectStore('state').get('codec-settings');
+      get.onsuccess = () => { database.close(); resolve({ gpu: get.result?.coolchic?.coolchicGpu }); };
+      get.onerror = () => { database.close(); resolve(null); };
+    };
+    request.onerror = () => resolve(null);
+  }))).toEqual({ gpu });
+}
+
 async function open(page: Page) {
   await page.goto('/');
   await page.getByRole('tab', { name: 'Cool-chic 5.0', exact: true }).click();
@@ -107,6 +120,43 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   const stream = await restoredFile.createReadStream();
   const chunks: Buffer[] = []; for await (const chunk of stream!) chunks.push(chunk);
   expect(Buffer.concat(chunks)).toEqual(encoded);
+});
+
+test('Cool-chic GPU toggle persists and automatic threaded WASM trains a portable file', async ({ page }, info) => {
+  const requests: string[] = [];
+  page.on('request', request => requests.push(request.url()));
+  const pane = await open(page);
+  const gpu = pane.getByRole('checkbox', { name: 'GPU training', exact: true });
+  await expect(gpu).toBeChecked();
+  await expect(pane.getByRole('checkbox', { name: /SIMD|multithreading/i })).toHaveCount(0);
+  await gpu.uncheck();
+  await upload(page, 128, 128);
+  await pane.getByLabel('Training iterations', { exact: true }).fill('0');
+  await expect(pane.getByLabel('Training iterations', { exact: true })).toHaveAttribute('aria-valuetext', '100 iterations');
+  await savedAcceleration(page, false);
+  await page.reload();
+  await page.getByRole('tab', { name: 'Cool-chic 5.0', exact: true }).click();
+  await expect(gpu).not.toBeChecked();
+  await pane.getByRole('button', { name: 'Encode', exact: true }).click();
+  await expect(pane).toHaveAttribute('data-phase', 'done', { timeout: 60000 });
+  const count = await page.evaluate(() => Math.min(8, Math.max(1, navigator.hardwareConcurrency - 1)));
+  const backend = pane.getByRole('region', { name: 'Training backend', exact: true });
+  await expect(backend).toContainText(`WASM SIMD · ${count} thread`);
+  await expect(backend).toContainText('WebGPU training disabled');
+  expect(requests.some(url => /workerHelpers-[^/]+\.js/.test(url))).toBe(count > 1);
+  const download = page.waitForEvent('download');
+  await pane.getByRole('button', { name: 'Download Cool-chic 5.0', exact: true }).click();
+  const file = info.outputPath('threaded.cool'), rgba = info.outputPath('threaded.rgba');
+  await (await download).saveAs(file);
+  execFileSync('cargo', ['run', '--quiet', '--manifest-path', 'crates/coolchic/Cargo.toml', '--example', 'rgba', '--', 'decode', file, rgba]);
+  expect(readFileSync(rgba)).toHaveLength(128 * 128 * 4);
+  await gpu.check();
+  await expect(gpu).toBeChecked();
+  await savedAcceleration(page, true);
+  await page.reload();
+  await page.getByRole('tab', { name: 'Cool-chic 5.0', exact: true }).click();
+  await expect(gpu).toBeChecked();
+  await expect(backend).toContainText(`WASM SIMD · ${count} thread`); // Stored output, not current controls.
 });
 
 test('Cool-chic rejects oversize input explicitly instead of silently resizing', async ({ page }) => {

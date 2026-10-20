@@ -58,6 +58,27 @@ browser resource limits, not claims about format limits or measured peak RSS.
 Malformed headers, parameter bounds and arithmetic are checked; entropy payloads
 are checked by canonical re-encoding. This is not a hardened hostile-file parser.
 
+## Browser acceleration
+
+Pointwise convolutions use contiguous CHW loops that LLVM vectorizes with WASM
+SIMD. A separate `threads` build adds a Rayon pool (up to 8 workers), parallel
+convolution forward/backward and learned filter passes. `parallel` also enables
+these kernels in native builds for independent tests. The portable build remains
+available without shared-memory support.
+
+Optional, default-on WebGPU offloads floating-point convolutions and analytical
+derivatives through a dedicated compute worker. The trainer sleeps in a bounded
+`Atomics.wait` during async GPU readback. It benchmarks qualifying shapes against
+actual CPU WASM and rejects offloads without a clear speed advantage; rejected
+shapes are cached in Rust before any further transfer allocation. Small kernels,
+SOAP, scheduling and integer entropy coding remain CPU work. Stream decoding and
+previews always use the portable CPU decoder. GPU and CPU multithreading are
+managed independently: GPU can be disabled; CPU SIMD/threading are automatic,
+with no off switch. Shared-memory paths require COOP/COEP and a secure context.
+Unsupported/failed acceleration falls back to CPU; notices report actual use.
+
+See `../../docs/coolchic-acceleration.md` for build flags, tests and measurements.
+
 ## Rust API
 
 ```rust,ignore

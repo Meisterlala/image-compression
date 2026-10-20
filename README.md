@@ -3,7 +3,7 @@
 Compare **JPEG AI, JPEG, AVIF, JPEG XL and Cool-chic v5** in your browser.
 Encoding, decoding and measurements run locally; images are not uploaded.
 There is no backend. Codecs use Rust or jSquash WebAssembly, with optional
-WebGPU decoding for JPEG AI.
+WebGPU decoding for JPEG AI and adaptive WebGPU training for Cool-chic.
 
 ## Run locally
 
@@ -12,6 +12,8 @@ Requires Node 22.12+, npm, Rust 1.89+, Git and `wasm-pack`.
 ```sh
 rustup target add wasm32-unknown-unknown
 cargo install wasm-pack --locked
+# The separate threaded Cool-chic WASM build needs a pinned nightly stdlib:
+rustup toolchain install nightly-2026-02-28 --profile minimal --component rust-src --target wasm32-unknown-unknown
 npm ci
 npm run build:wasm
 npm run models
@@ -29,6 +31,16 @@ needs all four models for the selected operating point.
 **After changing Rust, rebuild WASM.** Vite and `npm run build:web` do not
 recompile Rust. Use `npm run build:wasm`, then rebuild or reload the frontend.
 Generated WASM and model bundles are not committed.
+
+Cool-chic defaults to adaptive GPU training and CPU multithreading (up to 8
+workers for larger images). GPU can be disabled; CPU SIMD/threading are automatic,
+with no off switch. Threading and the
+GPU bridge require a secure context and cross-origin isolation; the supplied Vite
+and nginx configs provide COOP/COEP headers. Unsupported browsers fall back to
+portable single-thread SIMD WASM. Progress and result notices report the backend.
+GPU utilization may stay low when measured CPU execution is faster; calibration
+includes transfers/readback, not just shader time. Training is still expensive.
+See [acceleration validation and measurements](docs/coolchic-acceleration.md).
 
 ## Use
 

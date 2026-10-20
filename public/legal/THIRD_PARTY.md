@@ -14,6 +14,11 @@ third-party code and data. Open-source terms are not patent clearance.
   Orange modifications. Source: https://github.com/nikhilvyas/SOAP
 - nalgebra 0.34.2: Apache-2.0 (nalgebra-LICENSE.txt), portable matrix factorization.
   Source: https://github.com/dimforge/nalgebra
+- CPU threading: wasm-bindgen-rayon 1.3.0, rayon 1.12.0/rayon-core 1.13.0,
+  crossbeam, either and wasm_sync: Apache-2.0 selected (threading-LICENSES.txt),
+  plus crossbeam-channel's embedded third-party notices in the same file.
+  Sources: https://github.com/RReverser/wasm-bindgen-rayon,
+  https://github.com/rayon-rs/rayon and https://github.com/crossbeam-rs/crossbeam.
 - constriction 0.4.2: MIT license selected (constriction-LICENSE.txt).
   Source: https://github.com/bamler-lab/constriction
 - probability 0.20.3: MIT (probability-LICENSE.txt).

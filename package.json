@@ -12,7 +12,7 @@
     "source": "node scripts/package-source.mjs",
     "build:web": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "cargo test --manifest-path crates/codec/Cargo.toml && cargo test --manifest-path crates/coolchic/Cargo.toml && vitest run",
+    "test": "cargo test --manifest-path crates/codec/Cargo.toml && cargo test --manifest-path crates/coolchic/Cargo.toml && cargo test --manifest-path crates/coolchic/Cargo.toml --features parallel --test parallel && vitest run",
     "test:e2e": "playwright test",
     "check": "vue-tsc --noEmit"
   },

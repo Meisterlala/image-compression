@@ -2,6 +2,7 @@ node_modules/
 dist/
 src/wasm/
 src/wasm-coolchic/
+src/wasm-coolchic-threads/
 crates/codec/target/
 crates/coolchic/target/
 .cache/

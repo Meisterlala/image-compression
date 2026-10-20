@@ -12,6 +12,8 @@ pub mod fixed;
 pub mod inter_feature;
 pub mod network;
 pub mod parameters;
+#[cfg(feature = "parallel")]
+mod parallel;
 pub mod preset;
 pub mod pyramid;
 pub mod quantization;

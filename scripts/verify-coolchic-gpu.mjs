@@ -26,18 +26,40 @@ try {
     worker.onerror = event => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message)); };
     worker.postMessage(data);
   }), data);
-  const verifyStream = result => {
+  const verifyStream = (result, width = 32, height = 24) => {
     assert(result.bytes.length > 41);
     writeFileSync(join(dir, 'output.cool'), Buffer.from(result.bytes));
     execFileSync('cargo', ['run', '--quiet', '--manifest-path', 'crates/coolchic/Cargo.toml', '--example', 'rgba', '--', 'decode', join(dir, 'output.cool'), join(dir, 'output.rgba')]);
     const pixels = readFileSync(join(dir, 'output.rgba'));
-    assert.equal(pixels.length, 32 * 24 * 4);
+    assert.equal(pixels.length, width * height * 4);
     if (result.pixels) assert.deepEqual([...pixels], result.pixels);
   };
   const cpu = await runWorker({ type: 'loader', gpu: false });
   verifyStream(cpu);
-  assert(cpu.notices.some(n => n.includes('CPU WASM')));
+  assert(cpu.notices.some(n => n.includes('WASM SIMD')));
   console.log('PASS: explicit CPU opt-out trains a portable file');
+  // Force actual parallel kernels, not merely successful pool initialization.
+  for (const [ci, co, h, w, k, residual, relu] of [[8,8,129,131,1,1,1], [3,3,129,131,3,1,1]]) {
+    const params = [ci,co,h,w,k,residual,relu,1];
+    const input = Array.from({length: ci*h*w}, (_,i) => ((i*7)%23-11)/31);
+    const weight = Array.from({length: ci*co*k*k}, (_,i) => ((i*3)%19-9)/47);
+    const bias = Array.from({length: co}, (_,i) => (i-1)/13);
+    const gradient = Array.from({length: co*h*w}, (_,i) => ((i*5)%17-8)/29);
+    const args = { type: 'kernel', params, input, weight, bias, gradient };
+    const serial = await runWorker({ ...args, threads: false });
+    const parallel = await runWorker({ ...args, threads: 4 });
+    assert.equal(parallel.threads, 4); assert(!parallel.warning);
+    assert.equal(serial.result.length, parallel.result.length);
+    serial.result.forEach((v, i) => assert(Math.abs(v-parallel.result[i]) <= 3e-5 + Math.abs(v)*3e-4, `Threaded derivative ${i}`));
+  }
+  console.log('PASS: real 4-thread WASM pointwise/spatial forward and backward parity');
+  const threaded = await runWorker({ type: 'train', threads: 4, width: 128, height: 128 });
+  assert.equal(threaded.threads, 4); verifyStream(threaded, 128, 128);
+  console.log('PASS: actual parallel WASM training emits a portable native-decodable stream');
+  const noGpu = await runWorker({ type: 'loader', gpu: true, unavailable: true });
+  verifyStream(noGpu);
+  assert(noGpu.notices.some(n => n.includes('WebGPU training unavailable')));
+  console.log('PASS: missing WebGPU falls back with isolation still enabled');
   const hasGpu = await page.evaluate(async () => !!(await navigator.gpu?.requestAdapter()));
   if (!hasGpu && process.argv.includes('--require-gpu')) throw new Error('WebGPU adapter required but unavailable');
   if (hasGpu) {
@@ -101,10 +123,10 @@ try {
     assert(trained.calls > 0); assert(!trained.failure); verifyStream(trained);
     console.log(`PASS: GPU/WASM-trained stream independently decoded by native Rust (${trained.calls} GPU jobs, ${Math.round(trained.ms)} ms)`);
     if (process.argv.includes('--benchmark')) {
-      for (const width of [128, 384, 512, 1024]) {
+      for (const width of [128, 384, 512]) {
         const results = [];
-        for (const gpu of [false, true]) results.push(await runWorker({ type: 'train', gpu, calibrate: true, threshold: 8_000_000, width, height: width, steps: 10 }));
-        console.log(JSON.stringify({ benchmark: `${width}x${width}, init + 10 real WASM training steps`, cpu: results[0], gpu: results[1] }));
+        for (const [gpu, threads] of [[false,false], [true,false], [false,4], [false,8], [true,8]]) results.push(await runWorker({ type: 'train', gpu, threads, calibrate: true, threshold: 8_000_000, width, height: width, steps: 10 }));
+        console.log(JSON.stringify({ benchmark: `${width}x${width}, init + 10 real WASM training steps`, cpu: results[0], gpu: results[1], threads4: results[2], threads8: results[3], gpuThreads8: results[4] }));
       }
     }
   } else console.log('SKIP: WebGPU parity (no adapter); fallback checks still run');

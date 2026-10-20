@@ -52,6 +52,12 @@ impl Conv2d {
         if super::acceleration::convolution(self, input, None, &mut output.data) {
             return Ok(output);
         }
+        #[cfg(feature = "parallel")]
+        if super::parallel::worthwhile(
+            input.data.len() * self.output_channels * self.kernel * self.kernel,
+        ) {
+            return super::parallel::forward(self, input);
+        }
         // CHW pointwise GEMM: stream contiguous planes so LLVM can SIMD-
         // vectorize in WASM, retaining the channel accumulation order.
         if self.kernel == 1 {
@@ -127,6 +133,12 @@ impl Conv2d {
                     bias,
                 });
             }
+        }
+        #[cfg(feature = "parallel")]
+        if super::parallel::worthwhile(
+            input.data.len() * self.output_channels * self.kernel * self.kernel,
+        ) {
+            return super::parallel::backward(self, input, gradient);
         }
         let activated = if self.relu {
             Some(self.forward(input)?)

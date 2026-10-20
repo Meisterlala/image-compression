@@ -16,6 +16,7 @@ export async function createCoolChicAcceleration(cpu?: ConvCallback): Promise<Ac
   if (typeof WorkerGlobalScope === 'undefined' || !(globalThis instanceof WorkerGlobalScope)) {
     throw new Error('GPU training must run in a dedicated worker');
   }
+  if (!navigator.gpu) throw new Error('WebGPU is not available in this worker');
   const worker = new Worker(new URL('../coolchic-gpu.worker.ts', import.meta.url), { type: 'module' });
   try {
     await new Promise<void>((resolve, reject) => {

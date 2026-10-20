@@ -48,6 +48,15 @@ buffer estimate rejects training above 3 GiB and asks for confirmation above
 1.5 GiB before allocating candidates. These are browser guardrails, not reference
 format constraints or measured process RSS. It never silently downscales.
 
+## Acceleration
+
+The browser defaults to adaptive WebGPU and CPU multithreading. Shared-memory
+features require cross-origin isolation, with portable single-thread SIMD WASM
+as the fallback. Only training floating-point kernels are accelerated; output
+still uses the reference `.cool` format and portable CPU decoding. Backends and
+limits, independent derivative checks and reproducible measurements are described
+in [coolchic-acceleration.md](coolchic-acceleration.md).
+
 ## Independent validation
 
 The committed fixtures come from unmodified pinned Python modules and check

@@ -22,6 +22,7 @@ const args = [
   '--exclude=crates/coolchic/target',
   '--exclude=src/wasm',
   '--exclude=src/wasm-coolchic',
+  '--exclude=src/wasm-coolchic-threads',
   'src', 'crates', 'scripts', 'tests', 'docs', 'deploy', 'public/legal',
   'public/models/manifest.json', 'public/models/manifest-hop.json', 'public/models/manifest-sop.json', 'index.html', 'package.json', 'package-lock.json',
   'tsconfig.json', 'vite.config.ts', 'playwright.config.ts',

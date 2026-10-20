@@ -1,5 +1,6 @@
 import type { EncodeProgress, Settings } from '../types';
 import { createCoolChicAcceleration, type Acceleration } from './coolchic-acceleration';
+import { loadCoolChicRuntime } from './coolchic-runtime';
 
 // Full reference MSE intra training and real bitstream decoding, in a dedicated
 // WASM module/worker, with optional WebGPU convolution acceleration.
@@ -14,13 +15,16 @@ export async function loadCoolChic(settings: Settings, progress: (text: string, 
   if (!Number.isFinite(lambda) || lambda < 0.000001 || lambda > 0.1) {
     throw new Error('Cool-chic rate constraint must be between 0.000001 and 0.1.');
   }
-  const { default: init, CoolChicEncoder, decodeCoolChic, estimateCoolChicMemory, setCoolChicAccelerator, coolChicCpuConvolution } = await import('../wasm-coolchic/coolchic');
-  await init();
+  const { bindings: portable } = await loadCoolChicRuntime(false);
   const notices: string[] = [];
   return {
     notices,
-    estimateMemory: (width: number, height: number) => estimateCoolChicMemory(width, height, point),
+    estimateMemory: (width: number, height: number) => portable.estimateCoolChicMemory(width, height, point),
     async encode(image: ImageData): Promise<Uint8Array<ArrayBuffer>> {
+      const runtime = await loadCoolChicRuntime(image.width * image.height >= 16384);
+      const { CoolChicEncoder, setCoolChicAccelerator, coolChicCpuConvolution } = runtime.bindings;
+      if (runtime.warning) notices.push(runtime.warning);
+      notices.push(`CPU training backend: WASM SIMD · ${runtime.threads} thread${runtime.threads === 1 ? '' : 's'}.`);
       let encoder: InstanceType<typeof CoolChicEncoder> | undefined;
       let acceleration: Acceleration | undefined;
       try {
@@ -40,7 +44,7 @@ export async function loadCoolChic(settings: Settings, progress: (text: string, 
           const now = performance.now();
           if (now - lastProgress >= 100) {
             const quantizing = encoder.completed >= iterations;
-            progress(`${quantizing ? 'Final optimization' : 'Training'} Cool-chic ${point.toUpperCase()} · ${encoder.status}`, {
+            progress(`${quantizing ? 'Final optimization' : 'Training'} Cool-chic ${point.toUpperCase()} · ${runtime.threads} CPU thread${runtime.threads === 1 ? '' : 's'}${acceleration?.calls ? ' + WebGPU' : ''} · ${encoder.status}`, {
               stage: quantizing ? 'quantizing' : 'training',
               completed: encoder.progressCompleted,
               total: encoder.progressTotal,
@@ -60,14 +64,17 @@ export async function loadCoolChic(settings: Settings, progress: (text: string, 
         setCoolChicAccelerator(undefined, 0);
         encoder?.free();
         if (acceleration?.failure) notices.push(`WebGPU training fell back to CPU WASM: ${acceleration.failure}`);
-        notices.push(acceleration?.calls
+        if (acceleration) notices.push(acceleration.calls
           ? `Training used WebGPU (${acceleration.calls} convolution jobs) + CPU WASM. Portable decoding stays on CPU.`
-          : 'Training used CPU WASM SIMD (GPU disabled, unavailable, or operations below the offload threshold).');
+          : acceleration.calibrations.length
+            ? `WebGPU tested ${acceleration.calibrations.length} convolution shapes; CPU was faster, so GPU offload was skipped.`
+            : 'WebGPU ready; operations below the offload threshold stayed on CPU WASM.');
+        else if (settings.coolchicGpu === false) notices.push('WebGPU training disabled.');
         acceleration?.dispose();
       }
     },
     decode(buffer: ArrayBuffer): ImageData {
-      const image = decodeCoolChic(new Uint8Array(buffer));
+      const image = portable.decodeCoolChic(new Uint8Array(buffer));
       try { return new ImageData(new Uint8ClampedArray(image.rgba()), image.width, image.height); }
       finally { image.free(); }
     },

@@ -4,6 +4,7 @@ import init, { CoolChicEncoder, decodeCoolChic, setCoolChicAccelerator, coolChic
 import { createCoolChicAcceleration } from '../../src/lib/coolchic-acceleration';
 import { loadCoolChic } from '../../src/lib/coolchic';
 import { defaultSettings } from '../../src/types';
+import { loadCoolChicRuntime } from '../../src/lib/coolchic-runtime';
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'bridge') {
@@ -22,10 +23,18 @@ self.onmessage = async ({ data }) => {
     }
     await init();
     if (data.type === 'loader') {
+      if (data.unavailable) Object.defineProperty(navigator, 'gpu', { value: undefined });
       const codec = await loadCoolChic({ ...defaultSettings, coolchicGpu: data.gpu, coolchicIterations: 100 }, () => {});
       const start = performance.now();
       const bytes = await codec.encode(new ImageData(new Uint8ClampedArray(rgba), w, h));
       self.postMessage({ bytes: Array.from(bytes), notices: codec.notices, ms: performance.now() - start });
+      return;
+    }
+    const runtime = await loadCoolChicRuntime(!!data.threads, typeof data.threads === 'number' ? data.threads : undefined);
+    const { CoolChicEncoder, setCoolChicAccelerator, coolChicCpuConvolution } = runtime.bindings;
+    if (data.type === 'kernel') {
+      const result = coolChicCpuConvolution(new Uint32Array(data.params), new Float32Array(data.input), new Float32Array(data.weight), new Float32Array(data.bias), data.gradient ? new Float32Array(data.gradient) : undefined);
+      self.postMessage({ result: Array.from(result), threads: runtime.threads, warning: runtime.warning });
       return;
     }
     // Force offload on a tiny real job to test the entire WASM callback path,
@@ -41,14 +50,14 @@ self.onmessage = async ({ data }) => {
       let count = 0;
       while (!encoder.step() && ++count < steps) {}
       if (count >= steps) {
-        self.postMessage({ ms: performance.now() - start, calls: gpu?.calls ?? 0, failure: gpu?.failure, calibrations: gpu?.calibrations });
+        self.postMessage({ ms: performance.now() - start, calls: gpu?.calls ?? 0, failure: gpu?.failure, calibrations: gpu?.calibrations, threads: runtime.threads, warning: runtime.warning });
         return;
       }
       const trained = encoder; encoder = undefined;
       const bytes = trained.finish();
       setCoolChicAccelerator(undefined, 0);
       const image = decodeCoolChic(bytes);
-      try { self.postMessage({ bytes: Array.from(bytes), pixels: Array.from(image.rgba()), ms: performance.now() - start, calls: gpu?.calls ?? 0, failure: gpu?.failure }); }
+      try { self.postMessage({ bytes: Array.from(bytes), pixels: Array.from(image.rgba()), ms: performance.now() - start, calls: gpu?.calls ?? 0, failure: gpu?.failure, threads: runtime.threads }); }
       finally { image.free(); }
     } finally { encoder?.free(); setCoolChicAccelerator(undefined, 0); gpu?.dispose(); }
   } catch (error) { self.postMessage({ error: String(error) }); }

@@ -6,6 +6,8 @@ pub mod reference;
 #[cfg(feature = "wasm")]
 mod wasm;
 mod wavefront;
+#[cfg(all(feature = "threads", target_arch = "wasm32"))]
+pub use wasm_bindgen_rayon::init_thread_pool;
 pub use reference::training::{Settings as EncoderSettings, Trainer as Encoder};
 
 /// Browser guardrail, separate from the reference format's dimension fields.
