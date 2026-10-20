@@ -33,15 +33,17 @@ function selectModel(id: number) {
       <h2 :id="`${format.id}-title`">{{ format.label }}</h2>
     </header>
     <section class="pane-settings" aria-label="Settings">
+      <CodecControls v-model="settings" :disabled="working || importing" />
       <ModelLibrary
         v-if="format.id === 'jpegai'"
+        :key="settings.operatingPoint"
+        :operating-point="settings.operatingPoint"
         :selected="settings.model"
         :disabled="working || importing"
         :refresh-key="result"
         @use="selectModel"
         @busy="modelBusy = $event"
       />
-      <CodecControls v-model="settings" :disabled="working || importing" />
     </section>
     <p v-if="status.error" class="error" role="alert">{{ status.error }}</p>
     <p v-if="changed" class="changed-note">Settings or image size changed. Showing the previous result; encode again to update it.</p>

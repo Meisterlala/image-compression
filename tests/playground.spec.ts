@@ -142,6 +142,80 @@ test('four compact model cards select and download into cache without file expor
   await run(page, 'jpegai');
 });
 
+test('BOP/HOP selector explains the trade-off and uses real independent models and cache entries', async ({ page }) => {
+  await page.goto('/'); await upload(page);
+  const panel = pane(page, 'jpegai');
+  const point = panel.getByLabel('Operating point', { exact: true });
+  const help = panel.getByRole('button', { name: 'About Operating point', exact: true });
+  await expect(point).toHaveValue('bop');
+  await help.hover();
+  await expect(page.getByRole('tooltip')).toContainText('Base Operation Point');
+  await expect(page.getByRole('tooltip')).toContainText('High Operation Point');
+  await expect(page.getByRole('tooltip')).toContainText('slower decoding');
+  await page.keyboard.press('Escape');
+  await run(page, 'jpegai');
+  await expect(resultRow(page, 'jpegai')).toHaveAttribute('data-operating-point', 'bop');
+  const bop = await page.getByLabel('Right JPEG AI image', { exact: true }).evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL());
+  await point.selectOption('hop');
+  await expect(panel.locator('.model-control')).toHaveAttribute('data-operating-point', 'hop');
+  await expect(panel.locator('[data-model="1"]')).toHaveAttribute('data-ready', 'false');
+  await expect(panel.locator('.changed-note')).toBeVisible();
+  await expect(resultRow(page, 'jpegai')).toHaveAttribute('data-operating-point', 'bop');
+  await run(page, 'jpegai');
+  await expect(resultRow(page, 'jpegai')).toHaveAttribute('data-operating-point', 'hop');
+  await expect(resultRow(page, 'jpegai').locator('.dimensions')).toContainText('HOP');
+  const hop = await page.getByLabel('Right JPEG AI image', { exact: true }).evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL());
+  expect(hop).not.toBe(bop);
+  await point.selectOption('bop');
+  await expect(panel.locator('[data-model="1"]')).toHaveAttribute('data-ready', 'true');
+  await expect(resultRow(page, 'jpegai')).toHaveAttribute('data-operating-point', 'hop');
+  const download = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Download JPEG AI', exact: true }).click();
+  expect((await download).suggestedFilename()).toContain('-hop-'); // Saved output, not current control.
+  await page.route('**/models/*.zjb*', route => route.abort());
+  await run(page, 'jpegai'); // BOP cache is intact after HOP use.
+  expect(await page.getByLabel('Right JPEG AI image', { exact: true }).evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL())).toBe(bop);
+  await point.selectOption('hop');
+  await expect(panel.locator('[data-model="1"]')).toHaveAttribute('data-ready', 'true');
+  await run(page, 'jpegai'); // HOP cache is also independent and reusable.
+  expect(await page.getByLabel('Right JPEG AI image', { exact: true }).evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL())).toBe(hop);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await help.focus();
+  await expect(page.getByRole('tooltip')).toBeInViewport();
+  await page.keyboard.press('Escape');
+  await help.click();
+  await expect(page.getByRole('tooltip')).toContainText('higher memory');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
+test('HOP target-bpp search loads only HOP bundles and decodes its actual output', async ({ page }) => {
+  const weights: string[] = [];
+  page.on('request', request => { if (request.url().includes('.zjb')) weights.push(request.url()); });
+  await page.goto('/'); await upload(page);
+  await pane(page, 'jpegai').getByLabel('Operating point', { exact: true }).selectOption('hop');
+  await pane(page, 'jpegai').getByLabel('Model selection', { exact: true }).selectOption('target');
+  await run(page, 'jpegai');
+  await expect(resultRow(page, 'jpegai')).toHaveAttribute('data-operating-point', 'hop');
+  await expect(page.getByLabel('Right JPEG AI image', { exact: true })).toHaveAttribute('width', '96');
+  expect(weights).toHaveLength(4);
+  expect(weights.every(url => /\/hop-m[0-3]\.zjb/.test(url))).toBeTruthy();
+});
+
+test('switching operating point cancels a model download without leaving Encode disabled', async ({ page }) => {
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/models/bop-m0.zjb*', async route => { await pending; await route.abort().catch(() => {}); });
+  await page.goto('/'); await upload(page);
+  const request = page.waitForRequest('**/models/bop-m0.zjb*');
+  await pane(page, 'jpegai').locator('[data-model="0"] .model-select').click();
+  await request;
+  await pane(page, 'jpegai').getByLabel('Operating point', { exact: true }).selectOption('hop');
+  await expect(pane(page, 'jpegai').locator('.model-control')).toHaveAttribute('data-operating-point', 'hop');
+  await expect(pane(page, 'jpegai').getByRole('button', { name: 'Encode', exact: true })).toBeEnabled();
+  release();
+  await expect(pane(page, 'jpegai').getByRole('alert')).toHaveCount(0);
+});
+
 test('lossless modes really reconstruct identical working pixels', async ({ page }) => {
   await page.goto('/'); await upload(page);
   for (const format of ['avif', 'jxl']) {
@@ -404,6 +478,29 @@ test('expensive JPEG AI jobs pause for confirmation before loading any model wei
   await expect.poll(() => weightRequests).toBe(1);
   await expect(panel).toHaveAttribute('data-phase', 'error');
   await expect(panel.locator('.memory-warning')).toHaveCount(0);
+});
+
+test('HOP target search checks synthesis memory before downloading weights', async ({ page }) => {
+  let weights = 0;
+  await page.route('**/models/*.zjb*', route => { weights++; return route.abort(); });
+  await page.goto('/');
+  const png = await page.evaluate(() => {
+    const canvas = document.createElement('canvas'); canvas.width = 2048; canvas.height = 2048;
+    const context = canvas.getContext('2d')!; context.fillStyle = '#548d6a'; context.fillRect(0, 0, 2048, 2048);
+    return canvas.toDataURL('image/png').split(',')[1]!;
+  });
+  await page.getByLabel('Choose image file', { exact: true }).setInputFiles({ name: 'hop-memory.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+  const panel = pane(page, 'jpegai');
+  await panel.getByLabel('Operating point', { exact: true }).selectOption('hop');
+  await panel.getByLabel('Model selection', { exact: true }).selectOption('target');
+  await panel.getByRole('button', { name: 'Encode', exact: true }).click();
+  await expect(panel).toHaveAttribute('data-phase', 'confirming');
+  await expect(panel.locator('.memory-warning')).toContainText('1.57 GiB');
+  expect(weights).toBe(0);
+  await expect(panel.getByLabel('Operating point', { exact: true })).toBeDisabled();
+  await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(panel).toHaveAttribute('data-phase', 'cancelled');
+  expect(weights).toBe(0);
 });
 
 test('PSNR and SSIM tooltips explain the scores on hover, focus and tap', async ({ page }) => {

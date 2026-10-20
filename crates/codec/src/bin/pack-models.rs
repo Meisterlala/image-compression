@@ -8,19 +8,25 @@ use zenjpegai::{
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = env::args().collect();
-    if args.len() != 5 {
+    if args.len() != 6 {
         return Err(
-            "usage: pack-models <checkpoint-dir> <model-id> <notice-file> <output.zjb>".into(),
+            "usage: pack-models <checkpoint-dir> <model-id> <notice-file> <output.zjb> <bop|hop>"
+                .into(),
         );
     }
     let dir = PathBuf::from(&args[1]);
     let id: usize = args[2].parse()?;
+    let op = match args[5].as_str() {
+        "bop" => OperatingPoint::Bop,
+        "hop" => OperatingPoint::Hop,
+        _ => return Err("operating point must be bop or hop".into()),
+    };
     let mut source = ModelBundle::new();
     for ccs in 0..2 {
         for path in [
             model::common_path(id, ccs)?,
-            model::analysis_path(id, ccs, OperatingPoint::Bop)?,
-            model::synthesis_path(id, ccs, OperatingPoint::Bop)?,
+            model::analysis_path(id, ccs, op)?,
+            model::synthesis_path(id, ccs, op)?,
         ] {
             source.insert(path.clone(), fs::read(dir.join(path))?);
         }
@@ -42,12 +48,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         })?;
     }
-    model::load_analysis_primary(&recorder, id, OperatingPoint::Bop, &eng)?;
-    model::load_analysis_secondary(&recorder, id, OperatingPoint::Bop, &eng)?;
-    model::load_synthesis_primary(&recorder, id, OperatingPoint::Bop, &eng)?;
-    model::load_synthesis_secondary(&recorder, id, OperatingPoint::Bop, &eng)?;
+    model::load_analysis_primary(&recorder, id, op, &eng)?;
+    model::load_analysis_secondary(&recorder, id, op, &eng)?;
+    model::load_synthesis_primary(&recorder, id, op, &eng)?;
+    model::load_synthesis_secondary(&recorder, id, op, &eng)?;
     let bytes = recorder.pack(&fs::read_to_string(&args[3])?)?;
     fs::write(&args[4], &bytes)?;
-    println!("model {id}: {} bytes", bytes.len());
+    println!("{op:?} model {id}: {} bytes", bytes.len());
     Ok(())
 }

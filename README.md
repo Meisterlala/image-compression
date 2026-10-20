@@ -19,10 +19,10 @@ npm run dev
 ```
 
 Open http://localhost:5173. Initial model preparation downloads pinned reference
-checkpoints at build time (~300 MiB), validates their LFS SHA-256 hashes, and packs
-**encoder and decoder tensors**. No Python/PyTorch is needed. The resulting four
-bundles total ~104 MiB. Raw checkpoints remain in `.cache/`; model bundles and
-WASM are generated, not committed. The manifest and dependency lockfiles are committed.
+checkpoints at build time (~430 MiB), validates their LFS SHA-256 hashes, and packs
+**encoder and decoder tensors**. No Python/PyTorch is needed. The resulting eight
+bundles total ~322 MiB (four BOP at ~26 MiB each, four HOP at ~54 MiB each). Raw checkpoints remain in `.cache/`; model bundles and
+WASM are generated, not committed. The manifests and dependency lockfiles are committed.
 
 `npm run models` is required for JPEG AI, not JPEG/AVIF/JPEG XL. Missing assets
 produce a visible error rather than simulated compression. `npm run build` refuses
@@ -67,8 +67,13 @@ modifying or redistributing it. External library and model terms also apply.
   original file again, rather than repeatedly resizing an already reduced image.
   Size changes retain each codec's latest result and encode-time reference metadata. Only selecting
   a new source clears results. Rows show each result's dimensions so mixed sizes are clear.
-- JPEG AI: all four BOP models, adjustable quantisation, actual target-bpp search.
-- Four compact JPEG AI model cards. Selecting a model downloads it into Cache Storage;
+- JPEG AI: BOP/HOP Operating point selector with a hover/focus/tap explanation.
+  BOP is the faster default; HOP uses higher-complexity transforms, aiming for better
+  compression at the cost of slower decoding and more memory. Both offer four models,
+  adjustable quantisation and actual target-bpp search within the selected operating point.
+  Changing point retains the last output until the next encode; its table row and
+  download filename identify the point actually encoded. There is still one result per codec.
+- Four compact JPEG AI model cards for the selected operating point. Selecting a model downloads it into Cache Storage;
   each card has a Download/Remove action and cached-state color. Verification remains
   internal; there is no model file export/import or checksum display.
 - JPEG: quality, progressive mode and chroma subsampling (MozJPEG).
@@ -130,7 +135,7 @@ src/codec.worker.ts          orchestration; no UI-thread codec work
 crates/codec/src/lib.rs      Rust JPEG AI WASM adapter + metrics and unit tests
 crates/codec/src/bin/        native encoder+decoder model packer
 scripts/                    WASM/model preparation and source archive
-public/models/manifest.json  pinned weights and integrity metadata
+public/models/manifest*.json pinned BOP/HOP weights and integrity metadata
 ```
 
 The JPEG AI implementation is pinned to zenjpegai commit
@@ -171,9 +176,11 @@ against `dist/` using Vite preview. It does not certify JPEG AI conformance.
   not silently resize it. Downscale selection is explicit.
   Browser decoding can allocate before the source-size check; not hardened against
   hostile decompression bombs. Use a smaller source on memory-constrained devices.
-- JPEG AI is CPU-only BOP, advanced optional coding tools off. No WebGPU or hidden
+- JPEG AI is CPU-only BOP/HOP, advanced optional coding tools off. No WebGPU or hidden
   server fallback. Modern browsers with WASM SIMD are required for this build.
 - JPEG AI's encode working-set cap is 3072 MiB (3 GiB), with the same decoder cap.
+  HOP preflight also covers a conservative synthesis bound plus retained models, and
+  pads the target-search model allowance rather than using BOP's smaller estimate.
   Jobs estimated above 1536 MiB pause for explicit Continue encoding / Cancel confirmation
   before loading model weights or encoding. The estimate is not a measured whole-tab peak
   and excludes browser copies, model cache storage and other tabs; even a confirmed job
@@ -182,10 +189,10 @@ against `dist/` using Vite preview. It does not certify JPEG AI conformance.
   not held in another full-resolution canvas.
 - JPEG AI target-bpp search can take minutes and uses all four model bundles.
   Requested bpp is a target, not a guarantee; header overhead dominates tiny images.
-- File-size reduction is `(1 - encodedBytes / uploadedBytes) * 100`, excluding model
-  downloads. A negative reduction is displayed as a percentage larger. If the input
-  is resized, this measures the full workflow, not codec-only savings. Quality
-  metrics always compare normalized working pixels against decoded output pixels.
+- File-size reduction is `(1 - encodedBytes / referenceBytes) * 100`, excluding model
+  downloads. The reference is the uploaded file at full resolution, or an actual PNG
+  of the downscaled input. A negative reduction is displayed as a percentage larger.
+  Quality metrics always compare normalized encode-time input pixels against decoded output pixels.
   Settings are snapshotted per result; quality scales differ across formats.
 - SSIM: Rec.709 luma, non-overlapping 8x8 windows (including smaller edges), population
   variance, K1=.01/K2=.03/L=255. Not MS-SSIM. PSNR uses RGB MSE, with `null` in JSON

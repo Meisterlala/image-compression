@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Settings } from '../types';
+import MetricTooltip from './MetricTooltip.vue';
 const settings = defineModel<Settings>({ required: true });
 defineProps<{ disabled: boolean }>();
 const id = (field: string) => `${settings.value.format}-${field}`;
@@ -9,6 +10,16 @@ const id = (field: string) => `${settings.value.format}-${field}`;
   <fieldset class="settings-grid" :disabled="disabled">
     <legend class="sr-only">Encoding settings</legend>
     <template v-if="settings.format === 'jpegai'">
+      <div class="field">
+        <label class="sr-only" :for="id('operating-point')">Operating point</label>
+        <div class="field-heading">
+          <MetricTooltip label="Operating point" text="BOP (Base Operation Point) is the faster, lower-complexity option. HOP (High Operation Point) uses more complex neural transforms, aiming for better compression at similar quality, at the cost of slower decoding and higher memory use. Each uses its own model downloads; HOP is not guaranteed to produce a smaller file for every image or setting." />
+        </div>
+        <select :id="id('operating-point')" v-model="settings.operatingPoint">
+          <option value="bop">BOP · Faster</option>
+          <option value="hop">HOP · Higher complexity</option>
+        </select>
+      </div>
       <div class="field">
         <label :for="id('rate-mode')">Model selection</label>
         <select :id="id('rate-mode')" v-model="settings.rateMode">
@@ -64,7 +75,8 @@ const id = (field: string) => `${settings.value.format}-${field}`;
   min-width: 0;
 }
 
-.field > label {
+.field > label,
+.field-heading {
   display: flex;
   justify-content: space-between;
   gap: 8px;

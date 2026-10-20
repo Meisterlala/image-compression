@@ -3,12 +3,17 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
 // A production build must not silently omit the main codec's weights.
-const manifest = JSON.parse(await readFile('public/models/manifest.json', 'utf8'));
-if (manifest.models?.length !== 4) throw new Error('Run npm run models before building.');
-for (const model of manifest.models) {
-  const bytes = await readFile(`public/models/${model.file}`);
-  if (bytes.length !== model.bytes || createHash('sha256').update(bytes).digest('hex') !== model.sha256) {
-    throw new Error(`Model ${model.file} missing or corrupt. Run npm run models.`);
+for (const [op, file] of [['bop', 'manifest.json'], ['hop', 'manifest-hop.json']]) {
+  const manifest = JSON.parse(await readFile(`public/models/${file}`, 'utf8'));
+  if (manifest.operatingPoint !== op || !Array.isArray(manifest.models) || manifest.models.length !== 4 ||
+      manifest.models.some((model, id) => model.id !== id || model.file !== `${op}-m${id}.zjb`)) {
+    throw new Error(`Invalid or incomplete ${op.toUpperCase()} manifest. Run npm run models before building.`);
+  }
+  for (const model of manifest.models) {
+    const bytes = await readFile(`public/models/${model.file}`);
+    if (bytes.length !== model.bytes || createHash('sha256').update(bytes).digest('hex') !== model.sha256) {
+      throw new Error(`Model ${model.file} missing or corrupt. Run npm run models.`);
+    }
   }
 }
 const args = [
@@ -16,7 +21,7 @@ const args = [
   '--exclude=crates/codec/target',
   '--exclude=src/wasm',
   'src', 'crates', 'scripts', 'tests', 'deploy', 'public/legal',
-  'public/models/manifest.json', 'index.html', 'package.json', 'package-lock.json',
+  'public/models/manifest.json', 'public/models/manifest-hop.json', 'index.html', 'package.json', 'package-lock.json',
   'tsconfig.json', 'vite.config.ts', 'playwright.config.ts',
   'Dockerfile', '.dockerignore', '.gitignore', 'LICENSE', 'README.md',
 ];

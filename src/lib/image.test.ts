@@ -42,6 +42,9 @@ describe('display helpers', () => {
   });
   it('labels the saved experiment settings rather than current controls', () => {
     expect(runLabel(defaultSettings)).toContain('model 2');
+    expect(runLabel(defaultSettings)).toContain('BOP');
+    expect(runLabel({ ...defaultSettings, operatingPoint: 'hop' })).toContain('HOP');
+    expect(runLabel({ ...defaultSettings, operatingPoint: 'hop', rateMode: 'target' })).toContain('HOP');
     expect(runLabel({ ...defaultSettings, rateMode: 'target', targetBpp: 0.75 })).toContain('0.75 bpp target');
     expect(runLabel({ ...defaultSettings, format: 'jxl', lossless: true })).toContain('lossless');
   });

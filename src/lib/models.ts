@@ -1,6 +1,8 @@
+import type { OperatingPoint } from '../types';
+
 export const MODEL_CACHE = 'compression-models-v1';
 export interface ModelEntry { id: number; file: string; bytes: number; sha256: string }
-export interface ModelManifest { revision: string; operatingPoint: string; models: ModelEntry[] }
+export interface ModelManifest { revision: string; operatingPoint: OperatingPoint; models: ModelEntry[] }
 export const modelLabels = ['Lowest bitrate', 'Low bitrate', 'Medium bitrate', 'Highest fidelity'];
 
 function modelUrl(entry: ModelEntry) {
@@ -9,14 +11,16 @@ function modelUrl(entry: ModelEntry) {
   return url.href;
 }
 
-export async function loadManifest(): Promise<ModelManifest> {
-  const response = await fetch(`${import.meta.env.BASE_URL}models/manifest.json`, { cache: 'no-cache' });
+export async function loadManifest(operatingPoint: OperatingPoint = 'bop'): Promise<ModelManifest> {
+  if (operatingPoint !== 'bop' && operatingPoint !== 'hop') throw new Error('Invalid JPEG AI operating point');
+  const file = operatingPoint === 'bop' ? 'manifest.json' : 'manifest-hop.json';
+  const response = await fetch(`${import.meta.env.BASE_URL}models/${file}`, { cache: 'no-cache' });
   if (!response.ok || !response.headers.get('content-type')?.includes('json')) {
     throw new Error('JPEG AI models are missing. Run npm run models, then rebuild the static site.');
   }
   const manifest = await response.json() as ModelManifest;
-  if (manifest.operatingPoint !== 'bop' || manifest.models?.length !== 4 || manifest.models.some((m, i) =>
-    m.id !== i || m.file !== `bop-m${i}.zjb` || !Number.isInteger(m.bytes) || m.bytes <= 0 || m.bytes > 64 * 1048576 || !/^[a-f0-9]{64}$/.test(m.sha256))) {
+  if (manifest.operatingPoint !== operatingPoint || manifest.models?.length !== 4 || manifest.models.some((m, i) =>
+    m.id !== i || m.file !== `${operatingPoint}-m${i}.zjb` || !Number.isInteger(m.bytes) || m.bytes <= 0 || m.bytes > 128 * 1048576 || !/^[a-f0-9]{64}$/.test(m.sha256))) {
     throw new Error('Invalid JPEG AI model manifest');
   }
   return manifest;

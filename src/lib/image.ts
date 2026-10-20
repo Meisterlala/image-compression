@@ -57,6 +57,6 @@ export function compressionStats(result: Pick<import('../types').Result, 'width'
   };
 }
 export function runLabel(s: import('../types').Settings) {
-  if (s.format === 'jpegai') return s.rateMode === 'target' ? `${s.targetBpp} bpp target · BOP` : `model ${s.model + 1} · shift ${s.displacement} · BOP`;
+  if (s.format === 'jpegai') return s.rateMode === 'target' ? `${s.targetBpp} bpp target · ${s.operatingPoint.toUpperCase()}` : `model ${s.model + 1} · shift ${s.displacement} · ${s.operatingPoint.toUpperCase()}`;
   return `${s.lossless && s.format !== 'jpeg' ? 'lossless' : `quality ${s.quality}`} · ${s.format === 'jpeg' ? (s.progressive ? 'progressive' : 'baseline') : `effort ${s.effort}`}`;
 }

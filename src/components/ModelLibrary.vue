@@ -2,7 +2,9 @@
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { cachedModels, getModel, loadManifest, modelLabels, removeModel, type ModelManifest } from '../lib/models';
 
-const props = defineProps<{ selected: number; disabled: boolean; refreshKey?: object }>();
+import type { OperatingPoint } from '../types';
+
+const props = defineProps<{ operatingPoint: OperatingPoint; selected: number; disabled: boolean; refreshKey?: object }>();
 const emit = defineEmits<{ use: [id: number]; busy: [value: boolean] }>();
 const manifest = shallowRef<ModelManifest>();
 const cached = shallowRef(new Set<number>());
@@ -15,7 +17,7 @@ let abort: AbortController | undefined;
 async function refresh() {
   loading.value = true;
   try {
-    manifest.value = await loadManifest();
+    manifest.value = await loadManifest(props.operatingPoint);
     cached.value = await cachedModels(manifest.value.models);
   } catch (e) { error.value = e instanceof Error ? e.message : String(e); }
   finally { loading.value = false; }
@@ -50,12 +52,12 @@ async function remove(id: number) {
 onMounted(refresh);
 watch(downloading, value => emit('busy', value !== null));
 watch(() => props.refreshKey, refresh);
-onBeforeUnmount(() => abort?.abort());
+onBeforeUnmount(() => { abort?.abort(); emit('busy', false); });
 </script>
 
 <template>
-  <div class="model-control" role="group" aria-label="JPEG AI models">
-    <span class="field-label">Model</span>
+  <div class="model-control" role="group" aria-label="JPEG AI models" :data-operating-point="operatingPoint">
+    <span class="field-label">{{ operatingPoint.toUpperCase() }} models</span>
     <div class="model-grid">
       <div v-for="(label, index) in modelLabels" :key="index" class="model-card" :class="{ ready: cached.has(index), selected: selected === index }" :data-model="index" :data-ready="cached.has(index)">
         <button class="model-select" :aria-pressed="selected === index" :disabled="disabled || loading || downloading !== null" @click="choose(index)">
@@ -73,7 +75,7 @@ onBeforeUnmount(() => abort?.abort());
 
 <style scoped>
 .model-control {
-  margin-bottom: 20px;
+  margin-top: 20px;
 }
 
 .field-label {

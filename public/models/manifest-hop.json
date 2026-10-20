@@ -1,0 +1,30 @@
+{
+  "revision": "b9e573fef1dd90408270da23aae678c823f15525",
+  "operatingPoint": "hop",
+  "models": [
+    {
+      "id": 0,
+      "file": "hop-m0.zjb",
+      "bytes": 57069952,
+      "sha256": "097a7f3529627238e86bc2c5fb7e779c785c928415fc9f82fde72d750a758b40"
+    },
+    {
+      "id": 1,
+      "file": "hop-m1.zjb",
+      "bytes": 57069952,
+      "sha256": "a81991b5b3142c4c63da236493c544c6792bb10767c37c4ca549e5e9622df57c"
+    },
+    {
+      "id": 2,
+      "file": "hop-m2.zjb",
+      "bytes": 57069952,
+      "sha256": "7308ba00cd9f8a573cc8a5ace51a164fa448feae4089ba6ab75928a01de6a9af"
+    },
+    {
+      "id": 3,
+      "file": "hop-m3.zjb",
+      "bytes": 57069952,
+      "sha256": "06862fa719f1a5ce7494674368c6cafa9a9b0f61f73888e951ce91a896c2b6c6"
+    }
+  ]
+}

@@ -29,7 +29,8 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
     let encodeMs: number, decodeMs: number, startupMs: number;
     let confirmationWaitMs = 0;
     if (s.format === 'jpegai') {
-      const ai = new JpegAi();
+      const ai = new JpegAi(s.operatingPoint);
+      const point = s.operatingPoint.toUpperCase();
       estimatedMemory = ai.estimateMemory(width, height, s.rateMode === 'target');
       if (estimatedMemory > JPEG_AI_MEMORY_LIMIT) throw new Error('Estimated JPEG AI working memory exceeds the 3 GiB cap. Choose a smaller size under Downscale image.');
       if (estimatedMemory > JPEG_AI_CONFIRM_THRESHOLD) {
@@ -41,22 +42,22 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
         });
         confirmationWaitMs = performance.now() - waiting;
       }
-      const manifest = await loadManifest();
+      const manifest = await loadManifest(s.operatingPoint);
       const entries = s.rateMode === 'target' ? manifest.models : manifest.models.filter(m => m.id === s.model);
       if (entries.length !== (s.rateMode === 'target' ? 4 : 1)) throw new Error('Incomplete JPEG AI model manifest');
       for (const entry of entries) {
-        progress(`Loading JPEG AI model ${entry.id + 1} · ${(entry.bytes / 1048576).toFixed(1)} MiB (cached after first use)…`);
+        progress(`Loading JPEG AI ${point} model ${entry.id + 1} · ${(entry.bytes / 1048576).toFixed(1)} MiB (cached after first use)…`);
         const { bytes } = await getModel(entry, (received, total) => {
           progress(`Loading model ${entry.id + 1} · ${Math.round(received / total * 100)}% (download or local cache)…`);
         });
         notices.push(ai.addModels(bytes)); modelSize += bytes.length;
       }
       startupMs = performance.now() - start - confirmationWaitMs;
-      progress(s.rateMode === 'target' ? 'Searching all four models for the target bitrate. This may take several minutes…' : 'Encoding JPEG AI on your CPU…');
+      progress(s.rateMode === 'target' ? `Searching all four ${point} models for the target bitrate. This may take several minutes…` : `Encoding JPEG AI ${point} on your CPU…`);
       let tick = performance.now();
       encoded = new Uint8Array(ai.encode(new Uint8Array(pixels.buffer), width, height, s.model, s.displacement, s.rateMode === 'target' ? s.targetBpp : 0));
       encodeMs = performance.now() - tick;
-      progress('Decoding the actual JPEG AI bitstream…');
+      progress(`Decoding the actual JPEG AI ${point} bitstream…`);
       tick = performance.now();
       decoded = new Uint8ClampedArray(ai.decode(encoded));
       decodeMs = performance.now() - tick;

@@ -35,6 +35,7 @@ fn error(e: impl std::fmt::Debug) -> JsError {
 
 #[wasm_bindgen]
 pub struct JpegAi {
+    op: OperatingPoint,
     models: Models,
     encoder: Encoder,
     decoder: Decoder,
@@ -43,24 +44,28 @@ pub struct JpegAi {
 #[wasm_bindgen]
 impl JpegAi {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
+    pub fn new(operating_point: &str) -> Result<JpegAi, JsError> {
+        let op = parse_operating_point(operating_point).map_err(JsError::new)?;
         let models = Models::default();
         // One CPU worker, SIMD when compiled with +simd128. No WebGPU or server fallback.
         let engine = Engine::with(Tier::detect(), false);
         zenjpegai::nn::fast::set_pool_limit(32 << 20);
-        Self {
+        Ok(Self {
+            op,
             encoder: Encoder::with_source(Box::new(models.clone()), engine).limits(
                 EncodeLimits::default()
                     .with_max_pixels(MAX_PIXELS as u64)
                     .with_max_memory(MEMORY_LIMIT),
             ),
-            decoder: Decoder::with_source(Box::new(models.clone()), engine).limits(
-                zenjpegai::Limits::default()
-                    .with_max_pixels(MAX_PIXELS as u64)
-                    .with_max_memory(MEMORY_LIMIT),
-            ),
+            decoder: Decoder::with_source(Box::new(models.clone()), engine)
+                .operating_point(Some(op))
+                .limits(
+                    zenjpegai::Limits::default()
+                        .with_max_pixels(MAX_PIXELS as u64)
+                        .with_max_memory(MEMORY_LIMIT),
+                ),
             models,
-        }
+        })
     }
     #[wasm_bindgen(js_name = addModels)]
     pub fn add_models(&self, bundle: Vec<u8>) -> Result<String, JsError> {
@@ -68,7 +73,7 @@ impl JpegAi {
         store.add(bundle).map_err(error)?;
         Ok(store.notice().to_owned())
     }
-    /// Fixed BOP model with adjustable quantisation, or true target-bpp search across models.
+    /// Selected BOP/HOP model with quantisation, or target-bpp search within that point.
     pub fn encode(
         &self,
         rgba: &[u8],
@@ -97,7 +102,7 @@ impl JpegAi {
         };
         let params = EncodeParams {
             model_id: model,
-            op: OperatingPoint::Bop,
+            op: self.op,
             beta_displacement_log: [displacement; 2],
             ..Default::default()
         };
@@ -109,7 +114,14 @@ impl JpegAi {
             self.encoder.encode(src, params)
         };
         self.encoder.release_buffers();
-        result.map_err(error)
+        let bytes = result.map_err(error)?;
+        let headers = self.decoder.read_headers(&bytes).map_err(error)?;
+        if headers.picture.synthesis_transforms.first() != Some(&self.op) {
+            return Err(JsError::new(
+                "encoded JPEG AI operating point does not match",
+            ));
+        }
+        Ok(bytes)
     }
     pub fn decode(&self, stream: &[u8]) -> Result<Vec<u8>, JsError> {
         let image = self.decoder.decode(stream).map_err(error)?;
@@ -123,20 +135,41 @@ impl JpegAi {
     }
     #[wasm_bindgen(js_name = estimateMemory)]
     pub fn estimate_memory(&self, width: u32, height: u32, rate_matched: bool) -> f64 {
-        self.encoder
-            .estimate_memory(
-                width.into(),
-                height.into(),
-                OperatingPoint::Bop,
-                rate_matched,
-            )
-            .live_bytes as f64
+        estimate_job_memory(width.into(), height.into(), self.op, rate_matched) as f64
     }
 }
 impl Default for JpegAi {
     fn default() -> Self {
-        Self::new()
+        Self::new("bop").expect("BOP is a supported operating point")
     }
+}
+
+fn parse_operating_point(value: &str) -> Result<OperatingPoint, &'static str> {
+    match value {
+        "bop" => Ok(OperatingPoint::Bop),
+        "hop" => Ok(OperatingPoint::Hop),
+        _ => Err("JPEG AI operating point must be bop or hop"),
+    }
+}
+
+fn estimate_job_memory(width: u64, height: u64, op: OperatingPoint, rate_matched: bool) -> u64 {
+    let encode =
+        zenjpegai::encoder::estimate_encode_memory(width, height, op, rate_matched).live_bytes;
+    if op != OperatingPoint::Hop {
+        return encode;
+    }
+    // HOP synthesis can peak above analysis. The pinned encoder uses <=1024² synthesis
+    // tiles, decoded sequentially. Match the upstream decoder's 970 B/tile-pixel and
+    // 20 B/picture-pixel bound, with 128 MiB/model for retained bundles/encoder networks.
+    let retained = (if rate_matched { 4 } else { 1 }) * (128 << 20);
+    let decode = (44u64 << 20)
+        .saturating_add(20u64.saturating_mul(width.saturating_mul(height)))
+        .saturating_add(970 * width.min(1024) * height.min(1024))
+        .saturating_add(retained);
+    // Upstream's target-search model allowance is calibrated for BOP. Pad HOP's
+    // three extra model sets from 28 to 64 MiB each.
+    let encode = encode.saturating_add(if rate_matched { 3 * (36 << 20) } else { 0 });
+    encode.max(decode)
 }
 
 fn validate(rgba: &[u8], width: usize, height: usize, limit: usize) -> Result<(), &'static str> {
@@ -259,6 +292,20 @@ mod tests {
         assert!(estimate.live_bytes > 1536 << 20);
         assert!(estimate.live_bytes <= MEMORY_LIMIT);
         assert_eq!(MEMORY_LIMIT, 3072 << 20);
+    }
+    #[test]
+    fn operating_points_and_hop_memory_are_explicit() {
+        assert_eq!(parse_operating_point("bop"), Ok(OperatingPoint::Bop));
+        assert_eq!(parse_operating_point("hop"), Ok(OperatingPoint::Hop));
+        assert!(parse_operating_point("sop").is_err());
+        let bop = estimate_job_memory(1024, 1024, OperatingPoint::Bop, false);
+        let hop = estimate_job_memory(1024, 1024, OperatingPoint::Hop, false);
+        let analysis =
+            zenjpegai::encoder::estimate_encode_memory(1024, 1024, OperatingPoint::Hop, false);
+        assert!(hop > bop && hop > analysis.live_bytes);
+        assert!(estimate_job_memory(2048, 2048, OperatingPoint::Hop, true) > 1536 << 20);
+        assert!(estimate_job_memory(2048, 2048, OperatingPoint::Hop, true) <= MEMORY_LIMIT);
+        assert!(estimate_job_memory(6000, 4000, OperatingPoint::Hop, false) > MEMORY_LIMIT);
     }
     #[test]
     fn known_error() {

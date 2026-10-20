@@ -96,10 +96,10 @@ function original(metric: Metric): string {
               <template v-else>{{ original(metric.id) }}</template>
             </td>
           </tr>
-          <tr v-for="format in formats" :key="format.id" :data-result-format="format.id">
+          <tr v-for="format in formats" :key="format.id" :data-result-format="format.id" :data-operating-point="format.id === 'jpegai' ? results.jpegai?.settings.operatingPoint : undefined">
             <th scope="row">
               <button class="format-link" @click="emit('select', format.id)">{{ format.label }}</button>
-              <small v-if="results[format.id]" class="dimensions">{{ results[format.id]!.width }} × {{ results[format.id]!.height }}</small>
+              <small v-if="results[format.id]" class="dimensions"><template v-if="format.id === 'jpegai'">{{ results.jpegai!.settings.operatingPoint.toUpperCase() }} · </template>{{ results[format.id]!.width }} × {{ results[format.id]!.height }}</small>
             </th>
             <td
               v-for="metric in metrics"
