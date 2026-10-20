@@ -1,5 +1,40 @@
 import { test, expect } from '@playwright/test';
 
+for (const [width, height] of [[160, 90], [90, 160]]) {
+  test(`fit enlarges a small ${width}×${height} image to the available space`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/');
+    const png = await page.evaluate(({ width, height }) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d')!.fillRect(0, 0, width, height);
+      return canvas.toDataURL().split(',')[1]!;
+    }, { width, height });
+    await page.getByLabel('Choose image file', { exact: true }).setInputFiles({
+      name: 'small.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64'),
+    });
+    await page.getByRole('tab', { name: 'JPEG', exact: true }).click();
+    await page.locator('[data-codec="jpeg"]').getByRole('button', { name: /^Encode(?: again)?$/ }).click();
+    const zoom = page.getByLabel('Image comparison zoom', { exact: true });
+    await expect(zoom).toBeVisible();
+    await zoom.selectOption('fit');
+
+    for (const viewportSize of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewportSize);
+      await expect.poll(async () => page.locator('.viewer-scroll').evaluate(el => {
+        const style = getComputedStyle(el);
+        const availableWidth = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        const availableHeight = el.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+        const canvas = el.querySelector('canvas')!;
+        const bounds = canvas.getBoundingClientRect();
+        const scale = Math.min(availableWidth / canvas.width, availableHeight / canvas.height);
+        return Math.max(Math.abs(bounds.width - canvas.width * scale), Math.abs(bounds.height - canvas.height * scale));
+      })).toBeLessThan(1);
+    }
+  });
+}
+
 test('comparison supports drag pan, anchored pinch zoom and independent split dragging', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
