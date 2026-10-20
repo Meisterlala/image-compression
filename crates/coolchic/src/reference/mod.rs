@@ -4,12 +4,17 @@
 //! stays separate until reference bitstream and complete training parity pass.
 //! Ported from Orange Cool-Chic v5.0.0 (BSD-3-Clause); see UPSTREAM-LICENSE.txt.
 
+pub mod architecture;
 pub mod arm;
 pub mod convolution;
 pub mod inter_feature;
+pub mod network;
+pub mod parameters;
 pub mod pyramid;
 pub mod quantizer;
+pub mod random;
 pub mod rate;
+pub mod resize;
 pub mod soap;
 pub mod tensor;
 pub mod upsampling;

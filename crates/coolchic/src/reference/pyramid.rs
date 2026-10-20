@@ -19,8 +19,7 @@ pub struct PyramidGradient {
 impl Pyramid {
     fn states(&self, latents: &[Tensor]) -> Result<Vec<Tensor>> {
         if latents.is_empty()
-            || self.upsampling.is_empty()
-            || self.preconcat.is_empty()
+            || (latents.len() > 1 && (self.upsampling.is_empty() || self.preconcat.is_empty()))
             || self
                 .upsampling
                 .iter()

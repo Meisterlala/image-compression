@@ -7,6 +7,7 @@ use super::{
 };
 use crate::{Error, Result};
 
+#[derive(Clone, Debug)]
 pub struct InterFeature {
     /// One optional network per latent, in highest-to-lowest resolution order.
     pub networks: Vec<Option<Arm>>,
@@ -18,7 +19,12 @@ pub struct InterFeatureGradient {
     pub networks: Vec<Option<ArmGradient>>,
 }
 
-fn expand(input: &Tensor, height: usize, width: usize, allow_identity: bool) -> Result<Tensor> {
+pub(crate) fn expand(
+    input: &Tensor,
+    height: usize,
+    width: usize,
+    allow_identity: bool,
+) -> Result<Tensor> {
     if allow_identity && (input.height, input.width) == (height, width) {
         return Ok(input.clone());
     }
