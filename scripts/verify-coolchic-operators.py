@@ -31,9 +31,9 @@ def main():
     import torch
     from coolchic.component.core.synthesis import Synthesis, SynthesisConv2d
     from coolchic.training.soap import SOAP
-    from coolchic.component.core.arm import Arm, ArmLinear, _get_neighbor, _get_non_zero_pixel_ctx_index, _laplace_cdf
+    from coolchic.component.core.arm import Arm, ArmLinear, Ifce, _get_neighbor, _get_non_zero_pixel_ctx_index, _laplace_cdf
     from coolchic.component.core.upsampling import (
-        Upsampling, UpsamplingSeparableSymmetricConv2d,
+        Upsampling, fixed_upsampling, UpsamplingSeparableSymmetricConv2d,
         UpsamplingSeparableSymmetricConvTranspose2d,
     )
     from coolchic.component.core.quantizer import quantize, softround, generate_kumaraswamy_noise
@@ -70,7 +70,7 @@ def main():
         return {"weight": flat(module.weight.grad), "bias": flat(module.bias.grad)}
 
     cases = {"upstream_revision": REVISION, "pytorch_version": str(torch.__version__), "convolution": [], "synthesis": [], "filter": [],
-        "quantizer": [], "arm": [], "context": [], "rate": [], "pyramid": [], "soap": []}
+        "quantizer": [], "arm": [], "context": [], "rate": [], "pyramid": [], "soap": [], "ifce": []}
     for height, width in [(1, 1), (3, 5)]:
         for kernel, residual, relu in [(1, False, False), (3, False, True), (3, True, True)]:
             module = SynthesisConv2d(3, 3 if residual else 2, kernel, residual)
@@ -206,6 +206,44 @@ def main():
             "latent_grad": [tensor(x.grad) for x in latents], "output": tensor(y), "upstream": tensor(upstream),
             "upsampling": [filter_params(f, "upsample") for f in module.conv_transpose2ds],
             "preconcat": [filter_params(f, "residual") for f in module.conv2ds]})
+
+    for shapes, enabled in [([(5, 7), (3, 4), (2, 2)], [True, True, True]),
+            ([(3, 5), (2, 3), (1, 2), (1, 1)], [True, False, True, True])]:
+        sizes = [max(len(shapes) - i - 1, 1) if flag else 0 for i, flag in enumerate(enabled)]
+        module = Ifce(sizes, 4)
+        fill(module)
+        latents = [sequence((1, 1, h, w), offset=i * 9).requires_grad_() for i, (h, w) in enumerate(shapes)]
+        _, intermediate = fixed_upsampling(latents, mode="nearest")
+        results, upstreams = [], []
+        total = torch.tensor(0.)
+        for index, (latent, flag) in enumerate(zip(latents, enabled)):
+            if flag:
+                coarse = intermediate[len(latents) - 1 - index]
+                coarse_flat = coarse.permute(0, 2, 3, 1).reshape(-1, coarse.shape[1])
+                raw = module(coarse_flat, index)
+                raw = raw.reshape(1, coarse.shape[2], coarse.shape[3], 4).permute(0, 3, 1, 2)
+                result = torch.nn.functional.interpolate(raw, scale_factor=2., mode="nearest")[:, :, :latent.shape[2], :latent.shape[3]]
+            else:
+                result = torch.zeros(1, 4, *latent.shape[-2:])
+            upstream = sequence(result.shape, offset=index * 5)
+            total = total + (result * upstream).sum()
+            results.append(result)
+            upstreams.append(upstream)
+        total.backward()
+        networks, gradients = [], []
+        for index, flag in enumerate(enabled):
+            if flag:
+                arm = module.arms[module.index_to_arm[index]]
+                layers = [layer for layer in arm.mlp if isinstance(layer, ArmLinear)]
+                networks.append({"layers": [affine(layer, False) for layer in layers]})
+                gradients.append([conv_grad(layer) for layer in layers])
+            else:
+                networks.append(None)
+                gradients.append(None)
+        cases["ifce"].append({"outputs": 4, "networks": networks, "parameter_grad": gradients,
+            "latents": [tensor(x) for x in latents], "output": [tensor(x) for x in results],
+            "upstream": [tensor(x) for x in upstreams],
+            "latent_grad": [tensor(x.grad if x.grad is not None else torch.zeros_like(x)) for x in latents]})
 
     uniform = torch.tensor([0.0, 0.01, 0.25, 0.5, 0.75, 0.99, 1.0])
     cases["noise"] = [{"a": a, "uniform": flat(uniform),

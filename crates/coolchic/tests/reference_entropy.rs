@@ -1,6 +1,7 @@
 //! Trainable entropy-model parity; the existing integer bitstream remains separate.
 use coolchic::reference::{
     arm::{Arm, spatial_context, spatial_context_backward},
+    inter_feature::InterFeature,
     pyramid::Pyramid,
     rate::laplace_rate,
 };
@@ -75,6 +76,72 @@ fn laplace_rate_probability_floor_scale_clamp_and_gradients() {
             &case["arm_grad"],
             "Laplace ARM derivative",
         );
+    }
+}
+
+#[test]
+fn cross_resolution_ifce_forward_backward_and_disabled_levels() {
+    for case in fixtures()["ifce"].as_array().unwrap() {
+        let model = InterFeature {
+            output_channels: case["outputs"].as_u64().unwrap() as usize,
+            networks: case["networks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|network| {
+                    if network.is_null() {
+                        None
+                    } else {
+                        Some(Arm {
+                            layers: network["layers"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .map(conv)
+                                .collect(),
+                            stabiliser: None,
+                        })
+                    }
+                })
+                .collect(),
+        };
+        let latents: Vec<_> = case["latents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(tensor)
+            .collect();
+        let outputs = model.forward(&latents).unwrap();
+        for (actual, expected) in outputs.iter().zip(case["output"].as_array().unwrap()) {
+            tensor_close(actual, expected, "IFCE output");
+        }
+        let upstreams: Vec<_> = case["upstream"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(tensor)
+            .collect();
+        let gradient = model.backward(&latents, &upstreams).unwrap();
+        for (actual, expected) in gradient
+            .latents
+            .iter()
+            .zip(case["latent_grad"].as_array().unwrap())
+        {
+            tensor_close(actual, expected, "IFCE latent gradient");
+        }
+        for (actual, expected) in gradient
+            .networks
+            .iter()
+            .zip(case["parameter_grad"].as_array().unwrap())
+        {
+            if let Some(actual) = actual {
+                for (layer, expected) in actual.layers.iter().zip(expected.as_array().unwrap()) {
+                    conv_gradient(layer, expected);
+                }
+            } else {
+                assert!(expected.is_null());
+            }
+        }
     }
 }
 

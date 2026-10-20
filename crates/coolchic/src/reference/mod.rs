@@ -6,6 +6,7 @@
 
 pub mod arm;
 pub mod convolution;
+pub mod inter_feature;
 pub mod pyramid;
 pub mod quantizer;
 pub mod rate;

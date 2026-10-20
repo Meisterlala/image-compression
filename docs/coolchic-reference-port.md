@@ -13,7 +13,8 @@ Forward and analytical reverse-mode implementations, checked against fixtures pr
 - Learned symmetric/separable transposed-convolution upsampling with the reference border padding/crop; residual pre-concatenation filters.
 - Soft-round quantization, double soft-round with supplied Gaussian noise, hard rounding, and Kumaraswamy noise transform.
 - Full learned latent pyramid, including odd-size cropping, shared/per-level kernels and gradient accumulation.
-- Residual ARM MLP, optional stabiliser, IFCE linear network primitive, causal spatial contexts and zero-padded gradient scatter.
+- Residual ARM MLP, optional stabiliser, causal spatial contexts and zero-padded gradient scatter.
+- Cross-resolution IFCE graph: nearest-neighbour context pyramid, pointwise transformation before final interpolation, odd-size crops, disabled levels, dummy zero context on the first-decoded feature, and gradients into all already-decoded features.
 - Actual Laplace rate (not an L1 proxy), probability floor, scale clamp and analytical gradients into latents and ARM outputs.
 - SOAP in the reference trainer's configuration: per-axis Shampoo matrices/eigenbases, projected moments, periodic QR refresh, second-moment reorder, bias correction and post-update weight decay. Latent group uses the reference's unpreconditioned Adam-like update, including its skipped first step. Tests replay 25-step PyTorch trajectories across matrices, convolutions, biases, capped dimensions and latent grids, with a mid-run learning-rate change.
 
@@ -23,7 +24,7 @@ Upstream v5's `ste` branch assigns its result inside `torch.no_grad`, detaching 
 
 ## Remaining before replacing the app codec
 
-- Assemble cross-resolution IFCE contexts and integrate the neural modules into a complete training graph.
+- Integrate the ported neural modules into a complete training graph, including latent gains, distortion loss, hyperlatent/common-randomness handling and final output interpolation.
 - Gradient clipping, warm-up candidate selection, schedules, validation/checkpoint selection and quantization search around the ported optimizer.
 - Reference architecture/configuration choices and parameter initialization; wire rate constraint and iteration controls to actual reference settings, not the old quality/pass shortcuts.
 - Generalized bitstream headers/neural parameter parsing, integer ARM/IFCE and entropy coding for reference architectures; complete image reconstruction.
