@@ -97,6 +97,19 @@ mod browser {
         })
     }
 
+    // Shared WASM buffers remain valid across nested calibration allocations.
+    // Borrow read-only views for the synchronous callback instead of copying
+    // each tensor into a temporary JS array. Portable memory can detach on
+    // growth, so that path deliberately retains owned copies.
+    fn array(data: &[f32], shared: Option<&JsValue>) -> Float32Array {
+        if let Some(buffer) = shared {
+            let begin = data.as_ptr() as u32 / 4;
+            Float32Array::new(buffer).subarray(begin, begin + data.len() as u32)
+        } else {
+            Float32Array::from(data)
+        }
+    }
+
     pub fn convolution(
         layer: &Conv2d,
         input: &Tensor,
@@ -112,15 +125,18 @@ mod browser {
                 return false;
             };
             let params = Uint32Array::from(shape.as_slice());
+            let memory = wasm_bindgen::memory().unchecked_into::<js_sys::WebAssembly::Memory>();
+            let buffer = memory.buffer();
+            let shared = buffer
+                .is_instance_of::<js_sys::SharedArrayBuffer>()
+                .then_some(&buffer);
             let Ok(value) = callback.call5(
                 &JsValue::NULL,
                 &params,
-                &Float32Array::from(input.data.as_slice()),
-                &Float32Array::from(layer.weight.as_slice()),
-                &Float32Array::from(layer.bias.as_slice()),
-                &gradient.map_or(JsValue::NULL, |g| {
-                    Float32Array::from(g.data.as_slice()).into()
-                }),
+                &array(input.data.as_slice(), shared),
+                &array(layer.weight.as_slice(), shared),
+                &array(layer.bias.as_slice(), shared),
+                &gradient.map_or(JsValue::NULL, |g| array(g.data.as_slice(), shared).into()),
             ) else {
                 return false;
             };

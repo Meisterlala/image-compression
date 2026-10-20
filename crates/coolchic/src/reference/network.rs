@@ -44,7 +44,19 @@ pub struct Evaluation {
     pub loss: f32,
 }
 
+struct Reconstruction {
+    dense: Tensor,
+    synthesis_input: Tensor,
+    native: Tensor,
+    raw: Tensor,
+    synthesis_states: Vec<Tensor>,
+    pyramid_states: Vec<Tensor>,
+}
+
 struct Tape {
+    arm_states: Vec<Vec<Tensor>>,
+    synthesis_states: Vec<Tensor>,
+    pyramid_states: Vec<Tensor>,
     quantized: Vec<Tensor>,
     derivatives: Vec<Vec<f32>>,
     contexts: Vec<Tensor>,
@@ -296,7 +308,7 @@ impl Network {
         Ok(())
     }
 
-    fn reconstruction(&self, quantized: &[Tensor]) -> Result<(Tensor, Tensor, Tensor, Tensor)> {
+    fn reconstruction(&self, quantized: &[Tensor], capture: bool) -> Result<Reconstruction> {
         let arch = &self.architecture;
         let specs = arch.latent_specs();
         if quantized.len() != specs.len()
@@ -313,7 +325,11 @@ impl Network {
             .filter(|(_, s)| !s.hyper)
             .map(|(q, _)| q.clone())
             .collect();
-        let dense = self.pyramid.forward(&synthesis_latents)?;
+        let (dense, pyramid_states) = if capture {
+            self.pyramid.forward_cached(&synthesis_latents)?
+        } else {
+            (self.pyramid.forward(&synthesis_latents)?, Vec::new())
+        };
         let synthesis_input = if arch.common_randomness {
             let common = fixed_pyramid(&self.common)?;
             let common = resize(
@@ -326,13 +342,24 @@ impl Network {
         } else {
             dense.clone()
         };
-        let native = self.synthesis.forward(&synthesis_input)?;
+        let (native, synthesis_states) = if capture {
+            self.synthesis.forward_cached(&synthesis_input)?
+        } else {
+            (self.synthesis.forward(&synthesis_input)?, Vec::new())
+        };
         let raw = resize(&native, arch.height, arch.width, arch.interpolation)?;
-        Ok((dense, synthesis_input, native, raw))
+        Ok(Reconstruction {
+            dense,
+            synthesis_input,
+            native,
+            raw,
+            synthesis_states,
+            pyramid_states,
+        })
     }
 
     pub fn reconstruct(&self, quantized: &[Tensor]) -> Result<Tensor> {
-        Ok(self.reconstruction(quantized)?.3)
+        Ok(self.reconstruction(quantized, false)?.raw)
     }
 
     fn tape(
@@ -374,18 +401,32 @@ impl Network {
         };
         let mut contexts = Vec::new();
         let mut raw_arms = Vec::new();
+        let mut arm_states = Vec::new();
         let mut rates = Vec::new();
         for (index, latent) in quantized.iter().enumerate() {
             let mut context = spatial_context(latent, arch.spatial_context)?;
             if let Some(inter) = &inter {
                 context = context.concat(&inter[index])?;
             }
-            let raw = self.arm.forward(&context)?;
+            let raw = if evaluate {
+                self.arm.forward(&context)?
+            } else {
+                let (raw, states) = self.arm.forward_cached(&context)?;
+                arm_states.push(states);
+                raw
+            };
             rates.push(laplace_rate(latent, &raw)?);
             contexts.push(context);
             raw_arms.push(raw);
         }
-        let (dense, synthesis_input, native, raw) = self.reconstruction(&quantized)?;
+        let Reconstruction {
+            dense,
+            synthesis_input,
+            native,
+            raw,
+            synthesis_states,
+            pyramid_states,
+        } = self.reconstruction(&quantized, !evaluate)?;
         let mut image = raw.clone();
         for v in &mut image.data {
             *v = v.clamp(0.0, 1.0);
@@ -411,6 +452,9 @@ impl Network {
             loss: mse + lambda * rate_bpp,
         };
         Ok(Tape {
+            arm_states,
+            synthesis_states,
+            pyramid_states,
             quantized,
             derivatives,
             contexts,
@@ -459,9 +503,11 @@ impl Network {
             &output_gradient,
             self.architecture.interpolation,
         )?;
-        let synthesis = self
-            .synthesis
-            .backward(&tape.synthesis_input, &native_gradient)?;
+        let synthesis = self.synthesis.backward_cached(
+            &tape.synthesis_input,
+            &native_gradient,
+            &tape.synthesis_states,
+        )?;
         let dense_gradient = synthesis.input.first_channels(tape.dense.channels)?;
         let specs = self.architecture.latent_specs();
         let synthesis_latents: Vec<_> = tape
@@ -471,7 +517,11 @@ impl Network {
             .filter(|(_, s)| !s.hyper)
             .map(|(q, _)| q.clone())
             .collect();
-        let pyramid = self.pyramid.backward(&synthesis_latents, &dense_gradient)?;
+        let pyramid = self.pyramid.backward_cached(
+            &synthesis_latents,
+            &dense_gradient,
+            &tape.pyramid_states,
+        )?;
         let mut quantized_gradient: Vec<_> = tape
             .quantized
             .iter()
@@ -492,7 +542,11 @@ impl Network {
             for (a, b) in raw_gradient.data.iter_mut().zip(&rate.arm_derivative.data) {
                 *a = b * rate_weight;
             }
-            let gradient = self.arm.backward(&tape.contexts[index], &raw_gradient)?;
+            let gradient = self.arm.backward_cached(
+                &tape.contexts[index],
+                &raw_gradient,
+                &tape.arm_states[index],
+            )?;
             let spatial = gradient
                 .input
                 .first_channels(self.architecture.spatial_context)?;

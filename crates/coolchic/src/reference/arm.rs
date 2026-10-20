@@ -37,20 +37,36 @@ impl Arm {
     }
 
     pub fn forward(&self, input: &Tensor) -> Result<Tensor> {
+        Ok(self.forward_cached(input)?.0)
+    }
+
+    pub(super) fn forward_cached(&self, input: &Tensor) -> Result<(Tensor, Vec<Tensor>)> {
         let states = self.states(input)?;
         let mut output = states.last().unwrap().clone();
         if let Some(stabiliser) = &self.stabiliser {
             output.add_assign(&stabiliser.forward(input)?)?;
         }
-        Ok(output)
+        Ok((output, states))
     }
 
     pub fn backward(&self, input: &Tensor, gradient: &Tensor) -> Result<ArmGradient> {
         let states = self.states(input)?;
+        self.backward_cached(input, gradient, &states)
+    }
+
+    pub(super) fn backward_cached(
+        &self,
+        input: &Tensor,
+        gradient: &Tensor,
+        states: &[Tensor],
+    ) -> Result<ArmGradient> {
+        if states.len() != self.layers.len() + 1 {
+            return Err(Error("Invalid ARM activation tape"));
+        }
         let mut current = gradient.clone();
         let mut layers = Vec::with_capacity(self.layers.len());
-        for (layer, state) in self.layers.iter().zip(&states).rev() {
-            let g = layer.backward(state, &current)?;
+        for (index, layer) in self.layers.iter().enumerate().rev() {
+            let g = layer.backward_cached(&states[index], &current, Some(&states[index + 1]))?;
             current = g.input.clone();
             layers.push(g);
         }

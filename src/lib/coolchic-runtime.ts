@@ -22,7 +22,7 @@ export async function loadCoolChicRuntime(useThreads: boolean, requestedThreads?
   let warning: string | undefined;
   if (useThreads && globalThis.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined') {
     const cores = navigator.hardwareConcurrency || 1;
-    const count = requestedThreads ?? Math.min(8, Math.max(1, cores - 1));
+    const count = requestedThreads ?? Math.min(16, Math.max(1, cores > 2 ? cores - 1 : cores));
     if (count > 1) {
       try {
         // Feature test before fetching the threaded module.

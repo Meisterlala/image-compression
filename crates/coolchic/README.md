@@ -61,7 +61,7 @@ are checked by canonical re-encoding. This is not a hardened hostile-file parser
 ## Browser acceleration
 
 Pointwise convolutions use contiguous CHW loops that LLVM vectorizes with WASM
-SIMD. A separate `threads` build adds a Rayon pool (up to 8 workers), parallel
+SIMD. A separate `threads` build adds a Rayon pool (up to 16 workers), parallel
 convolution forward/backward and learned filter passes. `parallel` also enables
 these kernels in native builds for independent tests. The portable build remains
 available without shared-memory support.

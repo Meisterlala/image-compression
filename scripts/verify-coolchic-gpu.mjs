@@ -53,8 +53,8 @@ try {
     serial.result.forEach((v, i) => assert(Math.abs(v-parallel.result[i]) <= 3e-5 + Math.abs(v)*3e-4, `Threaded derivative ${i}`));
   }
   console.log('PASS: real 4-thread WASM pointwise/spatial forward and backward parity');
-  const threaded = await runWorker({ type: 'train', threads: 4, width: 128, height: 128 });
-  assert.equal(threaded.threads, 4); verifyStream(threaded, 128, 128);
+  const threaded = await runWorker({ type: 'train', threads: 4, width: 256, height: 256 });
+  assert.equal(threaded.threads, 4); verifyStream(threaded, 256, 256);
   console.log('PASS: actual parallel WASM training emits a portable native-decodable stream');
   const noGpu = await runWorker({ type: 'loader', gpu: true, unavailable: true });
   verifyStream(noGpu);
@@ -123,10 +123,11 @@ try {
     assert(trained.calls > 0); assert(!trained.failure); verifyStream(trained);
     console.log(`PASS: GPU/WASM-trained stream independently decoded by native Rust (${trained.calls} GPU jobs, ${Math.round(trained.ms)} ms)`);
     if (process.argv.includes('--benchmark')) {
+      const automatic = await page.evaluate(() => Math.min(16, Math.max(1, navigator.hardwareConcurrency > 2 ? navigator.hardwareConcurrency - 1 : navigator.hardwareConcurrency)));
       for (const width of [128, 384, 512]) {
         const results = [];
-        for (const [gpu, threads] of [[false,false], [true,false], [false,4], [false,8], [true,8]]) results.push(await runWorker({ type: 'train', gpu, threads, calibrate: true, threshold: 8_000_000, width, height: width, steps: 10 }));
-        console.log(JSON.stringify({ benchmark: `${width}x${width}, init + 10 real WASM training steps`, cpu: results[0], gpu: results[1], threads4: results[2], threads8: results[3], gpuThreads8: results[4] }));
+        for (const [gpu, threads] of [[false,false], [true,false], [false,4], [false,8], [false,automatic], [true,automatic]]) results.push(await runWorker({ type: 'train', gpu, threads, calibrate: true, threshold: 8_000_000, width, height: width, steps: 10 }));
+        console.log(JSON.stringify({ benchmark: `${width}x${width}, init + 10 real WASM training steps`, cpu: results[0], gpu: results[1], threads4: results[2], threads8: results[3], automaticThreads: results[4], gpuAutomatic: results[5] }));
       }
     }
   } else console.log('SKIP: WebGPU parity (no adapter); fallback checks still run');

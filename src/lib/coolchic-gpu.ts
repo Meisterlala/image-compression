@@ -37,13 +37,15 @@ export class CoolChicGpu {
     const size = Math.max(4, Math.ceil(bytes / 256) * 256);
     let buffer = this.buffers.get(name);
     if (!buffer || buffer.size < size) {
+      const liveBytes = [...this.buffers.values()].reduce((sum, value) => sum + value.size, 0);
+      if (liveBytes - (buffer?.size ?? 0) + size > 256 * 1024 ** 2) throw new Error('GPU buffer cache exceeds 256 MiB');
       buffer?.destroy();
       buffer = this.device.createBuffer({ size, usage });
       this.buffers.set(name, buffer);
     }
     return buffer;
   }
-  async convolution(params: Uint32Array, data: Float32Array): Promise<Float32Array> {
+  async convolution(params: Uint32Array, data: Float32Array, destination?: Float32Array): Promise<Float32Array> {
     if (this.lost) throw new Error(this.lost);
     const [ci, co, h, w, k, residual, relu, backward] = params;
     if (!ci || !co || !h || !w || !k || k % 2 !== 1 || (residual && ci !== co)) throw new Error('Invalid GPU convolution');
@@ -51,6 +53,7 @@ export class CoolChicGpu {
     if (data.length !== ci * pixels + weights + co + (backward ? co * pixels : 0)) throw new Error('Invalid GPU payload');
     const chunks = Math.ceil(pixels / 256);
     const resultCount = backward ? ci * pixels + weights + co : co * pixels;
+    if (destination && destination.length !== resultCount) throw new Error('GPU output shape mismatch');
     const sizes = [data.byteLength, co * pixels * 4, backward ? resultCount * 4 : 4, backward ? (weights + co) * chunks * 4 : 4];
     // Bound auxiliary buffers as well as the host transfer; never exceed the
     // conservative browser memory budget just to try an accelerator.
@@ -87,7 +90,8 @@ export class CoolChicGpu {
       this.device.queue.submit([encoder.finish()]);
       await staging.mapAsync(GPUMapMode.READ, 0, resultCount * 4);
       try {
-        const result = new Float32Array(staging.getMappedRange(0, resultCount * 4).slice(0));
+        const result = destination ?? new Float32Array(resultCount);
+        result.set(new Float32Array(staging.getMappedRange(0, resultCount * 4)));
         if (!result.every(Number.isFinite)) throw new Error('Non-finite GPU result');
         if (this.lost) throw new Error(this.lost);
         return result;

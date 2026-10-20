@@ -6,14 +6,18 @@
   and actual `.cool` bitstream remain Rust/WASM. No server or pretrained model.
 - **CPU multithreading** is automatic for images >=16,384 pixels. SIMD is always
   enabled; neither CPU optimization has an off switch. A separate
-  SIMD + atomics WASM module uses up to 8 Rayon workers (leaving at least one
-  advertised hardware thread free). Large convolution forward/backward and
-  learned upsampling/filter passes use disjoint output tiles/lines. Small jobs
+  SIMD + atomics WASM module uses up to 16 Rayon workers (leaving one
+  advertised hardware thread free on systems with more than two). Large
+  convolution forward/backward and learned filter passes use disjoint output
+  tiles/lines. Large soft quantization and Box-Muller noise transforms also run
+  in parallel, preserving the exact RNG stream and odd-count spare samples. Small jobs
   avoid pool startup and use the portable SIMD module.
 - **GPU training** is independently optional and on by default. WebGPU computes
   convolution/ARM forward and analytical input/weight/bias derivatives. Padding,
   residual connections and ReLU gradients match the reference operators. Fixed
-  partial reductions avoid floating-point atomic races.
+  partial reductions avoid floating-point atomic races. Shared WASM uses
+  read-only tensor views during the synchronous bridge call, and GPU readback
+  writes directly into the bridge response, eliminating redundant host copies.
 - Rust training is synchronous; a separate GPU worker performs asynchronous
   dispatch/readback while the training worker sleeps in `Atomics.wait`. This is
   not busy-spinning, nor a shared GPU tensor graph. Transfers and synchronization
@@ -21,6 +25,12 @@
 - The preview always decodes the actual output bytes with the **portable CPU
   decoder**. GPU rounding may change trained weights/bytes, just as training on
   different CPUs/GPUs can; the reference algorithm/format is unchanged.
+- Training retains ARM, synthesis and pyramid forward activations for reverse
+  mode instead of rebuilding them (and recomputing ReLUs) in backward passes.
+  Filter geometry is planned once per axis; spatial convolutions separate
+  replicate borders from contiguous SIMD interiors. Soft quantization shares
+  forward/derivative tanh evaluations and hoists the temperature normalizer.
+  The conservative memory estimate includes additional retained-buffer headroom.
 
 Low GPU utilization is not itself an error. Qualifying kernels (>=8 million MACs)
 are warmed up and timed against **actual local CPU WASM**, including the bridge's
@@ -83,7 +93,7 @@ additional degenerate/border/multi-chunk GPU cases, the worker bridge, GPU-train
 streams decoded by a separate native process, missing WebGPU, and missing
 isolation. `--require-gpu` makes unavailable GPU hardware a failure rather than a
 skip. `--benchmark` also compares portable WASM, adaptive GPU, 4/8 CPU threads and
-GPU + 8 threads. Unit tests inject timeout/device failure and check crossover
+the automatic pool and GPU + automatic threads. Unit tests inject timeout/device failure and check crossover
 selection/disposal. Native parallel tests compare large kernels and learned-filter
 derivatives with a genuine one-thread pool, not just pool startup.
 
@@ -94,21 +104,38 @@ Chromium headless, Ryzen 7 7700X, RTX 2080 Ti. LOP, synthetic square RGB input,
 steps**, not a complete encode. Module loading and worker/pool initialization are
 outside these timing samples; GPU calibration is inside. Single samples:
 
-| Image | Portable SIMD | 4 CPU threads | 8 CPU threads | Adaptive GPU + 8 threads |
-|---|---:|---:|---:|---:|
-| 128² | 369 ms | 322 ms | 284 ms | 279 ms |
-| 384² | 3,186 ms | 1,783 ms | 1,423 ms | 1,591 ms |
-| 512² | 5,832 ms | 3,164 ms | 2,473 ms | 2,770 ms |
+| Image | Portable SIMD | 4 CPU threads | 8 CPU threads | Automatic (15 threads) | GPU + automatic |
+|---|---:|---:|---:|---:|---:|
+| 128² | 207 ms | 168 ms | 137 ms | 140 ms | 141 ms |
+| 384² | 1,691 ms | 937 ms | 777 ms | 733 ms | 871 ms |
+| 512² | 3,033 ms | 1,631 ms | 1,315 ms | 1,247 ms | 1,481 ms |
 
 On this machine, threaded CPU won the GPU crossover checks, so low GPU utilization
 is expected in the last column. Initial calibration costs time, amortized over
-long runs. Adaptive GPU with **one** CPU thread measured 5,468 ms at 512² versus
-5,832 ms portable. Individual 512² spatial forward/backward GPU kernels including
-bridge took about 11/16 ms versus 29/51 ms portable CPU; the rest of training is
-still CPU work.
+long runs. Adaptive GPU with **one** CPU thread measured 3,111 ms at 512² versus
+3,033 ms portable: faster spatial backward kernels did not repay calibration
+within this short sample. A 512² backward GPU job including bridge took about
+12 ms versus 49 ms portable CPU, but the threaded CPU won that comparison.
 
 A captured pre-planar-optimization browser artifact took 1,033 / 9,188 / 16,465 ms
 for the same 128² / 384² / 512² initialization + 10-step smoke benchmark. Thus the
-combined planar/SIMD + eight-thread path was roughly 3.6–6.7× faster in these
-samples. This is not a claim of full-encode speedup, better compression, or stable
-performance on other hardware. Re-run the verifier on the target browser/device.
+combined SIMD/caching + automatic-thread path was roughly 7.4–13.2× faster in
+these samples. This is not a claim of full-encode speedup or stable performance
+on other hardware. Re-run the verifier on the target browser/device.
+
+A separate **complete 2,000-iteration** 96×64 synthetic RGB encode measured
+60,631 ms on the captured original artifact and 11,160 ms on the optimized
+portable WASM: about 5.4× faster, with the same 512-byte file size and
+44.668127 dB decoded PSNR. This small job does not need a CPU pool. These are
+local sanity measurements, not a compression benchmark or a guarantee for
+larger images.
+
+## Remaining GPU bottleneck
+
+This is still a hybrid trainer, **not a GPU-resident training graph**. Every
+GPU convolution crosses a host synchronization boundary, and the CPU owns the
+rest of the graph and optimizer state. Parallel shader invocations alone cannot
+remove that boundary. Batching network stages and keeping activations/gradients
+on-device would be the next architectural step toward sustained GPU utilization;
+it is not implemented by the per-operator bridge described here. Neither 100%
+GPU utilization nor instantaneous 2,000-iteration encoding is promised.

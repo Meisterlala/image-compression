@@ -14,9 +14,8 @@ self.onmessage = async ({ data }: MessageEvent<{ type: 'init' | 'dispose' | 'con
   try {
     if (!gpu || !data.params || !data.inputLength || !data.outputLength) throw new Error('GPU worker not initialized');
     const input = new Float32Array(data.shared, 32, data.inputLength);
-    const result = await gpu.convolution(data.params, input);
-    if (result.length !== data.outputLength) throw new Error('GPU output shape mismatch');
-    new Float32Array(data.shared, 32 + data.inputLength * 4, result.length).set(result);
+    const output = new Float32Array(data.shared, 32 + data.inputLength * 4, data.outputLength);
+    await gpu.convolution(data.params, input, output);
     Atomics.store(control, 0, 1);
   } catch (error) {
     self.postMessage({ type: 'error', message: String(error) });

@@ -16,17 +16,20 @@ async function upload(page: Page, width = 96, height = 64) {
   await expect(page.getByRole('region', { name: 'Image input', exact: true })).toHaveAttribute('data-width', String(width));
 }
 
-async function savedAcceleration(page: Page, gpu: boolean) {
-  await expect.poll(() => page.evaluate(() => new Promise(resolve => {
+async function storedCoolChicSettings(page: Page) {
+  return page.evaluate(() => new Promise<Record<string, unknown> | null>(resolve => {
     const request = indexedDB.open('image-compression-state', 1);
     request.onsuccess = () => {
       const database = request.result;
       const get = database.transaction('state', 'readonly').objectStore('state').get('codec-settings');
-      get.onsuccess = () => { database.close(); resolve({ gpu: get.result?.coolchic?.coolchicGpu }); };
+      get.onsuccess = () => { database.close(); resolve(get.result?.coolchic ?? null); };
       get.onerror = () => { database.close(); resolve(null); };
     };
     request.onerror = () => resolve(null);
-  }))).toEqual({ gpu });
+  }));
+}
+async function savedAcceleration(page: Page, gpu: boolean) {
+  await expect.poll(async () => (await storedCoolChicSettings(page))?.coolchicGpu).toBe(gpu);
 }
 
 async function open(page: Page) {
@@ -107,7 +110,7 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   await pane.getByRole('radio', { name: 'MOP', exact: true }).check();
   await pane.getByLabel('Rate constraint (λ)', { exact: true }).fill('80');
   await pane.getByLabel('Training iterations', { exact: true }).fill('50');
-  await expect(page.locator('[data-persistence]')).toContainText('Saved locally');
+  await expect.poll(() => storedCoolChicSettings(page)).toMatchObject({ coolchicPoint: 'mop', coolchicLambda: 0.01 });
   await page.reload();
   await expect(pane).toHaveAttribute('data-phase', 'done');
   await expect(pane.getByRole('radio', { name: 'MOP', exact: true })).toBeChecked();
@@ -139,7 +142,7 @@ test('Cool-chic GPU toggle persists and automatic threaded WASM trains a portabl
   await expect(gpu).not.toBeChecked();
   await pane.getByRole('button', { name: 'Encode', exact: true }).click();
   await expect(pane).toHaveAttribute('data-phase', 'done', { timeout: 60000 });
-  const count = await page.evaluate(() => Math.min(8, Math.max(1, navigator.hardwareConcurrency - 1)));
+  const count = await page.evaluate(() => Math.min(16, Math.max(1, navigator.hardwareConcurrency > 2 ? navigator.hardwareConcurrency - 1 : navigator.hardwareConcurrency)));
   const backend = pane.getByRole('region', { name: 'Training backend', exact: true });
   await expect(backend).toContainText(`WASM SIMD · ${count} thread`);
   await expect(backend).toContainText('WebGPU training disabled');

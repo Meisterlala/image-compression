@@ -46,6 +46,51 @@ impl Conv2d {
         ((out * self.input_channels + input) * self.kernel + y) * self.kernel + x
     }
 
+    /// Replicate borders separately; the interior is a contiguous SIMD axpy.
+    /// Keeping channel/ky/kx order preserves each output's scalar sum order.
+    pub(super) fn forward_row(&self, input: &Tensor, out: usize, y: usize, values: &mut [f32]) {
+        let width = input.width;
+        let pad = self.kernel / 2;
+        for channel in 0..input.channels {
+            for ky in 0..self.kernel {
+                let iy = (y + ky).saturating_sub(pad).min(input.height - 1);
+                let row = &input.data[(channel * input.height + iy) * width
+                    ..(channel * input.height + iy + 1) * width];
+                for kx in 0..self.kernel {
+                    let offset = kx as isize - pad as isize;
+                    let left = (-offset).max(0).min(width as isize) as usize;
+                    let end =
+                        (width as isize - offset).clamp(left as isize, width as isize) as usize;
+                    let weight = self.weight[self.weight_index(out, channel, ky, kx)];
+                    for value in &mut values[..left] {
+                        *value += row[0] * weight;
+                    }
+                    if end > left {
+                        let start = (left as isize + offset) as usize;
+                        for (value, &sample) in values[left..end]
+                            .iter_mut()
+                            .zip(&row[start..start + end - left])
+                        {
+                            *value += sample * weight;
+                        }
+                    }
+                    for value in &mut values[end..] {
+                        *value += row[width - 1] * weight;
+                    }
+                }
+            }
+        }
+        for (x, value) in values.iter_mut().enumerate() {
+            *value += self.bias[out];
+            if self.residual {
+                *value += input.data[(out * input.height + y) * width + x];
+            }
+            if self.relu {
+                *value = value.max(0.0);
+            }
+        }
+    }
+
     pub fn forward(&self, input: &Tensor) -> Result<Tensor> {
         self.validate(input)?;
         let mut output = Tensor::zeros(self.output_channels, input.height, input.width)?;
@@ -83,32 +128,8 @@ impl Conv2d {
             }
             return Ok(output);
         }
-        let pad = self.kernel / 2;
-        for out in 0..self.output_channels {
-            for y in 0..input.height {
-                for x in 0..input.width {
-                    let mut value = 0.0;
-                    for channel in 0..input.channels {
-                        for ky in 0..self.kernel {
-                            let iy = (y + ky).saturating_sub(pad).min(input.height - 1);
-                            for kx in 0..self.kernel {
-                                let ix = (x + kx).saturating_sub(pad).min(input.width - 1);
-                                value += input.data[input.index(channel, iy, ix)]
-                                    * self.weight[self.weight_index(out, channel, ky, kx)];
-                            }
-                        }
-                    }
-                    value += self.bias[out];
-                    if self.residual {
-                        value += input.data[input.index(out, y, x)];
-                    }
-                    if self.relu {
-                        value = value.max(0.0);
-                    }
-                    let index = output.index(out, y, x);
-                    output.data[index] = value;
-                }
-            }
+        for (index, values) in output.data.chunks_mut(input.width).enumerate() {
+            self.forward_row(input, index / input.height, index % input.height, values);
         }
         Ok(output)
     }
@@ -116,6 +137,15 @@ impl Conv2d {
     /// Exact reverse-mode derivative, including repeated border samples caused
     /// by replicate padding. No finite-difference approximations in training.
     pub fn backward(&self, input: &Tensor, gradient: &Tensor) -> Result<ConvGradient> {
+        self.backward_cached(input, gradient, None)
+    }
+
+    pub(super) fn backward_cached(
+        &self,
+        input: &Tensor,
+        gradient: &Tensor,
+        output: Option<&Tensor>,
+    ) -> Result<ConvGradient> {
         self.validate(input)?;
         if (gradient.channels, gradient.height, gradient.width)
             != (self.output_channels, input.height, input.width)
@@ -138,10 +168,15 @@ impl Conv2d {
         if super::parallel::worthwhile(
             input.data.len() * self.output_channels * self.kernel * self.kernel,
         ) {
-            return super::parallel::backward(self, input, gradient);
+            return super::parallel::backward(self, input, gradient, output);
         }
-        let activated = if self.relu {
+        let recomputed = if self.relu && output.is_none() {
             Some(self.forward(input)?)
+        } else {
+            None
+        };
+        let activated = if self.relu {
+            output.or(recomputed.as_ref())
         } else {
             None
         };
@@ -259,19 +294,44 @@ impl Synthesis {
     }
 
     pub fn forward(&self, input: &Tensor) -> Result<Tensor> {
-        let states = self.intermediates(input)?;
-        self.output_transform
-            .forward(&self.merged(input, states.last().unwrap())?)
+        Ok(self.forward_cached(input)?.0)
+    }
+
+    fn training_states(&self, input: &Tensor) -> Result<Vec<Tensor>> {
+        let mut states = self.intermediates(input)?;
+        states.push(self.merged(input, states.last().unwrap())?);
+        Ok(states)
+    }
+
+    pub(super) fn forward_cached(&self, input: &Tensor) -> Result<(Tensor, Vec<Tensor>)> {
+        let states = self.training_states(input)?;
+        Ok((
+            self.output_transform.forward(states.last().unwrap())?,
+            states,
+        ))
     }
 
     pub fn backward(&self, input: &Tensor, gradient: &Tensor) -> Result<SynthesisGradient> {
-        let states = self.intermediates(input)?;
-        let merged = self.merged(input, states.last().unwrap())?;
-        let output_transform = self.output_transform.backward(&merged, gradient)?;
+        let states = self.training_states(input)?;
+        self.backward_cached(input, gradient, &states)
+    }
+
+    pub(super) fn backward_cached(
+        &self,
+        input: &Tensor,
+        gradient: &Tensor,
+        states: &[Tensor],
+    ) -> Result<SynthesisGradient> {
+        if states.len() != self.trunk.len() + 2 {
+            return Err(Error("Invalid synthesis activation tape"));
+        }
+        let output_transform = self
+            .output_transform
+            .backward(states.last().unwrap(), gradient)?;
         let mut current = output_transform.input.clone();
         let mut trunk = Vec::with_capacity(self.trunk.len());
-        for (layer, state) in self.trunk.iter().zip(&states).rev() {
-            let g = layer.backward(state, &current)?;
+        for (index, layer) in self.trunk.iter().enumerate().rev() {
+            let g = layer.backward_cached(&states[index], &current, Some(&states[index + 1]))?;
             current = g.input.clone();
             trunk.push(g);
         }

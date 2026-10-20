@@ -24,7 +24,45 @@ pub struct FilterGradient {
     pub half: Vec<f32>,
 }
 
+#[derive(Clone, Copy)]
+struct Tap {
+    source: usize,
+    weight: f32,
+    half: usize,
+}
+struct AxisPlan {
+    offsets: Vec<usize>,
+    taps: Vec<Tap>,
+}
+impl AxisPlan {
+    fn at(&self, target: usize) -> &[Tap] {
+        &self.taps[self.offsets[target]..self.offsets[target + 1]]
+    }
+}
+
 impl Filter {
+    fn axis_plan(&self, size: usize, targets: usize) -> AxisPlan {
+        let mut plan = AxisPlan {
+            offsets: Vec::with_capacity(targets + 1),
+            taps: Vec::with_capacity(targets * self.kernel),
+        };
+        for target in 0..targets {
+            plan.offsets.push(plan.taps.len());
+            for k in 0..self.kernel {
+                if let Some(source) = self.source(target, k, size) {
+                    let half = self.half_index(k);
+                    plan.taps.push(Tap {
+                        source,
+                        weight: self.half[half],
+                        half,
+                    });
+                }
+            }
+        }
+        plan.offsets.push(plan.taps.len());
+        plan
+    }
+
     fn validate(&self) -> Result<()> {
         let valid = match self.mode {
             FilterMode::Upsample => self.kernel >= 4 && self.kernel.is_multiple_of(2),
@@ -77,31 +115,57 @@ impl Filter {
             .checked_mul(if horizontal { factor } else { 1 })
             .ok_or(Error("Reference upsampling dimensions overflow"))?;
         let mut output = Tensor::zeros(input.channels, height, width)?;
+        // Geometry is identical on every row/channel. Build it once, not
+        // once per sample/tap. Vertical and residual-horizontal passes stream
+        // contiguous slices, enabling WASM SIMD without changing tap order.
+        let plan = if !horizontal || self.mode == FilterMode::Upsample {
+            Some(self.axis_plan(
+                if horizontal {
+                    input.width
+                } else {
+                    input.height
+                },
+                if horizontal { width } else { height },
+            ))
+        } else {
+            None
+        };
         let row = |index: usize, values: &mut [f32]| {
             let channel = index / height;
             let y = index % height;
-            for (x, value) in values.iter_mut().enumerate() {
-                let mut sum = 0.0;
-                for k in 0..self.kernel {
-                    let position = self.source(
-                        if horizontal { x } else { y },
-                        k,
-                        if horizontal {
-                            input.width
-                        } else {
-                            input.height
-                        },
-                    );
-                    if let Some(position) = position {
-                        let i = input.index(
-                            channel,
-                            if horizontal { y } else { position },
-                            if horizontal { position } else { x },
-                        );
-                        sum += input.data[i] * self.half[self.half_index(k)];
+            if !horizontal {
+                for tap in plan.as_ref().unwrap().at(y) {
+                    let start = input.index(channel, tap.source, 0);
+                    for (value, &sample) in values.iter_mut().zip(&input.data[start..start + width])
+                    {
+                        *value += sample * tap.weight;
                     }
                 }
-                *value = sum;
+            } else if self.mode == FilterMode::Residual {
+                let source = &input.data[index * input.width..(index + 1) * input.width];
+                for k in 0..self.kernel {
+                    let offset = k as isize - (self.kernel / 2) as isize;
+                    let dst = (-offset).max(0) as usize;
+                    let src = offset.max(0) as usize;
+                    if dst >= width || src >= input.width {
+                        continue;
+                    }
+                    let len = (width - dst).min(input.width - src);
+                    let weight = self.half[self.half_index(k)];
+                    for (value, &sample) in values[dst..dst + len]
+                        .iter_mut()
+                        .zip(&source[src..src + len])
+                    {
+                        *value += sample * weight;
+                    }
+                }
+            } else {
+                let source = &input.data[index * input.width..(index + 1) * input.width];
+                for (x, value) in values.iter_mut().enumerate() {
+                    for tap in plan.as_ref().unwrap().at(x) {
+                        *value += source[tap.source] * tap.weight;
+                    }
+                }
             }
         };
         #[cfg(feature = "parallel")]
@@ -136,30 +200,30 @@ impl Filter {
             input: Tensor::zeros(input.channels, input.height, input.width)?,
             half: vec![0.0; self.half.len()],
         };
+        let plan = self.axis_plan(
+            if horizontal {
+                input.width
+            } else {
+                input.height
+            },
+            if horizontal {
+                gradient.width
+            } else {
+                gradient.height
+            },
+        );
         for channel in 0..gradient.channels {
             for y in 0..gradient.height {
                 for x in 0..gradient.width {
                     let g = gradient.data[gradient.index(channel, y, x)];
-                    for k in 0..self.kernel {
-                        let position = self.source(
-                            if horizontal { x } else { y },
-                            k,
-                            if horizontal {
-                                input.width
-                            } else {
-                                input.height
-                            },
+                    for tap in plan.at(if horizontal { x } else { y }) {
+                        let i = input.index(
+                            channel,
+                            if horizontal { y } else { tap.source },
+                            if horizontal { tap.source } else { x },
                         );
-                        if let Some(position) = position {
-                            let i = input.index(
-                                channel,
-                                if horizontal { y } else { position },
-                                if horizontal { position } else { x },
-                            );
-                            let ki = self.half_index(k);
-                            result.input.data[i] += g * self.half[ki];
-                            result.half[ki] += g * input.data[i];
-                        }
+                        result.input.data[i] += g * tap.weight;
+                        result.half[tap.half] += g * input.data[i];
                     }
                 }
             }
@@ -193,6 +257,7 @@ impl Filter {
         } else {
             gradient.height
         };
+        let plan = self.axis_plan(size, targets);
         let parts: Vec<_> = (0..lines)
             .into_par_iter()
             .map(|line| {
@@ -216,17 +281,14 @@ impl Filter {
                         if horizontal { fixed } else { target },
                         if horizontal { target } else { fixed },
                     )];
-                    for k in 0..self.kernel {
-                        if let Some(position) = self.source(target, k, size) {
-                            let ki = self.half_index(k);
-                            values[position] += g * self.half[ki];
-                            let i = input.index(
-                                c,
-                                if horizontal { fixed } else { position },
-                                if horizontal { position } else { fixed },
-                            );
-                            half[ki] += g * input.data[i];
-                        }
+                    for tap in plan.at(target) {
+                        values[tap.source] += g * tap.weight;
+                        let i = input.index(
+                            c,
+                            if horizontal { fixed } else { tap.source },
+                            if horizontal { tap.source } else { fixed },
+                        );
+                        half[tap.half] += g * input.data[i];
                     }
                 }
                 (values, half)

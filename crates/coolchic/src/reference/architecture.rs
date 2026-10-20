@@ -178,6 +178,9 @@ impl Architecture {
             + 12
             + if training {
                 3 * contexts * (self.arm_hidden + 1) + 4 * self.ifce_outputs + 20
+                    // Retained forward activations avoid recomputation in
+                    // reverse mode; include their extra live-buffer headroom.
+                    + outputs + contexts + 2 * self.synthesis_inputs()
             } else {
                 2 * self.ifce_outputs
             };

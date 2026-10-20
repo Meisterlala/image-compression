@@ -49,9 +49,23 @@ impl Pyramid {
         Ok(self.states(latents)?.pop().unwrap())
     }
 
+    pub(super) fn forward_cached(&self, latents: &[Tensor]) -> Result<(Tensor, Vec<Tensor>)> {
+        let states = self.states(latents)?;
+        Ok((states.last().unwrap().clone(), states))
+    }
+
     pub fn backward(&self, latents: &[Tensor], gradient: &Tensor) -> Result<PyramidGradient> {
         let states = self.states(latents)?;
-        if !gradient.same_shape(states.last().unwrap()) {
+        self.backward_cached(latents, gradient, &states)
+    }
+
+    pub(super) fn backward_cached(
+        &self,
+        latents: &[Tensor],
+        gradient: &Tensor,
+        states: &[Tensor],
+    ) -> Result<PyramidGradient> {
+        if states.is_empty() || !gradient.same_shape(states.last().unwrap()) {
             return Err(Error("Invalid reference pyramid gradient shape"));
         }
         let mut result = PyramidGradient {

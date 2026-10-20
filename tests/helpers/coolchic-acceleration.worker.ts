@@ -45,7 +45,7 @@ self.onmessage = async ({ data }) => {
     try {
       setCoolChicAccelerator(gpu?.convolution, data.threshold ?? 0);
       const start = performance.now();
-      encoder = new CoolChicEncoder(rgba, w, h, 'lop', 100, 0.001);
+      encoder = new CoolChicEncoder(rgba, w, h, data.point ?? 'lop', data.iterations ?? 100, 0.001);
       const steps = data.steps ?? Infinity;
       let count = 0;
       while (!encoder.step() && ++count < steps) {}
@@ -55,9 +55,16 @@ self.onmessage = async ({ data }) => {
       }
       const trained = encoder; encoder = undefined;
       const bytes = trained.finish();
+      const ms = performance.now() - start;
       setCoolChicAccelerator(undefined, 0);
       const image = decodeCoolChic(bytes);
-      try { self.postMessage({ bytes: Array.from(bytes), pixels: Array.from(image.rgba()), ms: performance.now() - start, calls: gpu?.calls ?? 0, failure: gpu?.failure, threads: runtime.threads }); }
+      try {
+        const pixels = image.rgba();
+        let squaredError = 0;
+        for (let i = 0; i < pixels.length; i++) if (i % 4 !== 3) squaredError += (pixels[i] - rgba[i]) ** 2;
+        const psnr = 10 * Math.log10(255 ** 2 / (squaredError / (w * h * 3)));
+        self.postMessage({ bytes: Array.from(bytes), pixels: Array.from(pixels), ms, psnr, calls: gpu?.calls ?? 0, failure: gpu?.failure, threads: runtime.threads });
+      }
       finally { image.free(); }
     } finally { encoder?.free(); setCoolChicAccelerator(undefined, 0); gpu?.dispose(); }
   } catch (error) { self.postMessage({ error: String(error) }); }

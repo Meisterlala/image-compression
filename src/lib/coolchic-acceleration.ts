@@ -57,7 +57,9 @@ export async function createCoolChicAcceleration(cpu?: ConvCallback): Promise<Ac
         worker.terminate();
         return null;
       }
-      return new Float32Array(shared, 32 + inputLength * 4, outputLength).slice();
+      // Rust copies this completed response synchronously before the next
+      // request. Returning the view avoids another full-size host copy.
+      return new Float32Array(shared, 32 + inputLength * 4, outputLength);
   };
   const backend: Acceleration = {
     calls: 0,

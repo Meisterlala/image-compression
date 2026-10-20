@@ -18,9 +18,13 @@ pub fn soft_round(x: f32, temperature: f32) -> f32 {
         + 0.5
 }
 
-fn soft_derivative(x: f32, temperature: f32) -> f32 {
-    let tanh = ((x - x.floor() - 0.5) / temperature).tanh();
-    0.5 * (1.0 - tanh * tanh) / (temperature * (1.0 / (2.0 * temperature)).tanh())
+fn soft_pair(x: f32, temperature: f32, normalizer: f32, derivative_denominator: f32) -> (f32, f32) {
+    let floor = x.floor();
+    let tanh = ((x - floor - 0.5) / temperature).tanh();
+    (
+        floor + 0.5 * tanh / normalizer + 0.5,
+        0.5 * (1.0 - tanh * tanh) / derivative_denominator,
+    )
 }
 
 /// Returns forward values and elementwise dy/dx. `Hard` has zero gradient,
@@ -39,24 +43,46 @@ pub fn quantize(
     {
         return Err(Error("Invalid reference quantizer parameters"));
     }
-    let mut output = Vec::with_capacity(input.len());
-    let mut derivative = Vec::with_capacity(input.len());
-    for (&x, &n) in input.iter().zip(noise) {
-        let (value, gradient) = match mode {
-            Quantizer::None => (x + n, 1.0),
-            Quantizer::Hard => (x.round_ties_even(), 0.0),
-            Quantizer::StraightThrough => (x.round_ties_even(), 0.0),
-            Quantizer::SoftAlone => (soft_round(x, temperature), soft_derivative(x, temperature)),
-            Quantizer::Soft => {
-                let inner = soft_round(x, temperature) + n;
-                (
-                    soft_round(inner, temperature),
-                    soft_derivative(inner, temperature) * soft_derivative(x, temperature),
-                )
-            }
-        };
-        output.push(value);
-        derivative.push(gradient);
+    // The temperature normalizer is constant across the tensor. Forward and
+    // derivative share the same tanh, rather than evaluating it twice/sample.
+    let normalizer = if matches!(mode, Quantizer::Soft | Quantizer::SoftAlone) {
+        (1.0 / (2.0 * temperature)).tanh()
+    } else {
+        1.0
+    };
+    let derivative_denominator = temperature * normalizer;
+    let apply = |x: f32, n: f32| match mode {
+        Quantizer::None => (x + n, 1.0),
+        Quantizer::Hard => (x.round_ties_even(), 0.0),
+        Quantizer::StraightThrough => (x.round_ties_even(), 0.0),
+        Quantizer::SoftAlone => soft_pair(x, temperature, normalizer, derivative_denominator),
+        Quantizer::Soft => {
+            let (inner, dx) = soft_pair(x, temperature, normalizer, derivative_denominator);
+            let (value, dy) = soft_pair(inner + n, temperature, normalizer, derivative_denominator);
+            (value, dy * dx)
+        }
+    };
+    let mut output = vec![0.0; input.len()];
+    let mut derivative = vec![0.0; input.len()];
+    #[cfg(feature = "parallel")]
+    if super::parallel::worthwhile(input.len() * 32) {
+        use rayon::prelude::*;
+        output
+            .par_iter_mut()
+            .zip(derivative.par_iter_mut())
+            .zip(input.par_iter().zip(noise.par_iter()))
+            .with_min_len(2048)
+            .for_each(|((value, gradient), (&x, &n))| {
+                (*value, *gradient) = apply(x, n);
+            });
+        return Ok((output, derivative));
+    }
+    for ((value, gradient), (&x, &n)) in output
+        .iter_mut()
+        .zip(&mut derivative)
+        .zip(input.iter().zip(noise))
+    {
+        (*value, *gradient) = apply(x, n);
     }
     Ok((output, derivative))
 }
@@ -77,6 +103,36 @@ pub fn kumaraswamy(uniform: f32, a: f32) -> Result<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_tanh_and_parallel_soft_quantization_match_the_scalar_formulas() {
+        let input: Vec<_> = (0..65537).map(|i| (i % 811) as f32 / 31.0 - 12.0).collect();
+        let noise: Vec<_> = (0..input.len())
+            .map(|i| (i % 37) as f32 / 101.0 - 0.2)
+            .collect();
+        for temperature in [0.08, 0.35, 1.2] {
+            let old_derivative = |x: f32| {
+                let t = ((x - x.floor() - 0.5) / temperature).tanh();
+                0.5 * (1.0 - t * t) / (temperature * (1.0 / (2.0 * temperature)).tanh())
+            };
+            for mode in [Quantizer::SoftAlone, Quantizer::Soft] {
+                let (values, derivatives) = quantize(&input, &noise, mode, temperature).unwrap();
+                for (i, (&x, &n)) in input.iter().zip(&noise).enumerate() {
+                    let (value, derivative) = if matches!(mode, Quantizer::Soft) {
+                        let inner = soft_round(x, temperature) + n;
+                        (
+                            soft_round(inner, temperature),
+                            old_derivative(inner) * old_derivative(x),
+                        )
+                    } else {
+                        (soft_round(x, temperature), old_derivative(x))
+                    };
+                    assert_eq!(values[i].to_bits(), value.to_bits());
+                    assert_eq!(derivatives[i].to_bits(), derivative.to_bits());
+                }
+            }
+        }
+    }
 
     #[test]
     fn ties_are_even_and_ste_does_not_change_forward() {

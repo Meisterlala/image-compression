@@ -169,7 +169,11 @@ impl Runner {
         let noise: Vec<f32> = if matches!(self.phase.quantizer, Quantizer::Hard) {
             vec![0.0; n]
         } else {
-            (0..n).map(|_| random.normal() * sigma).collect()
+            let mut values = random.normal_values(n);
+            for value in &mut values {
+                *value *= sigma;
+            }
+            values
         };
         let (_, gradient) = self.network.loss_gradient(
             target,

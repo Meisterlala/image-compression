@@ -32,7 +32,7 @@ needs all four models for the selected operating point.
 recompile Rust. Use `npm run build:wasm`, then rebuild or reload the frontend.
 Generated WASM and model bundles are not committed.
 
-Cool-chic defaults to adaptive GPU training and CPU multithreading (up to 8
+Cool-chic defaults to adaptive GPU training and CPU multithreading (up to 16
 workers for larger images). GPU can be disabled; CPU SIMD/threading are automatic,
 with no off switch. Threading and the
 GPU bridge require a secure context and cross-origin isolation; the supplied Vite
