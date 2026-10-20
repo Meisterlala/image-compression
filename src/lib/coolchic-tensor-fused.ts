@@ -325,7 +325,15 @@ export function fusedConvolution(x: T4, weights: tf.Tensor, bias: tf.Tensor,
     save([input, w, value]);
     return { value, gradFunc: (dy: T4, saved: tf.Tensor[]) => {
       const dx = run('CoolConv_input', { weights: saved[1], act: saved[2], dy }, attrs);
-      const grads = parameters ? tf.engine().runKernel('CoolConv_parameters', { x: saved[0], act: saved[2], dy }, attrs) as tf.Tensor[]
+      let grads: tf.Tensor[];
+      if (parameters && kernel === 1) {
+        // A pointwise filter gradient is a matrix product over all pixels.
+        // Use the tiled/split-K backend instead of one serial 256-pixel loop
+        // for every output/input channel pair.
+        const gated = relu ? dy.mul(saved[2].greater(0).cast('float32')) : dy;
+        const pixels = x.shape[0] * x.shape[1] * x.shape[2];
+        grads = [tf.matMul(gated.reshape([pixels,co]),saved[0].reshape([pixels,x.shape[3]]),true,false).reshape(w.shape), gated.sum([0,1,2]).reshape(b.shape)];
+      } else grads = parameters ? tf.engine().runKernel('CoolConv_parameters', { x: saved[0], act: saved[2], dy }, attrs) as tf.Tensor[]
         : [tf.zerosLike(w), tf.zerosLike(b)];
       return [dx, ...grads];
     } };

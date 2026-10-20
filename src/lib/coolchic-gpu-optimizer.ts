@@ -7,6 +7,8 @@ export interface SoapTensor {
 export interface SoapLayout { size: number; parameters: number; tensors: SoapTensor[] }
 export type SoapBasis = (gram: Float32Array, previous?: Float32Array) => Float32Array;
 
+type Encode = (encoder: GPUCommandEncoder) => void;
+
 export class GpuSoap {
   readonly state: GPUBuffer;
   private scratch: GPUBuffer[];
@@ -16,6 +18,8 @@ export class GpuSoap {
   private pipelines = new Map<string, GPUComputePipeline>();
   private groups = new Map<GPUComputePipeline, { buffers: GPUBuffer[]; group: GPUBindGroup }[]>();
   private bases = new Map<SoapAxis, Float32Array>();
+  private recording?: Encode[];
+  private recorded?: { gradient: GPUBuffer; commands: Encode[] };
   constructor(private device: GPUDevice, readonly layout: SoapLayout, private basis: SoapBasis) {
     const allocate = (size: number, usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST) => device.createBuffer({ size: Math.max(4, size * 4), usage });
     this.state = allocate(layout.size);
@@ -43,8 +47,6 @@ export class GpuSoap {
       pipeline = this.device.createComputePipeline({ layout: 'auto', compute: { module: this.device.createShaderModule({ label: 'CoolChicSoap', code: source }), entryPoint: 'main' } });
       this.pipelines.set(source, pipeline);
     }
-    const pass = encoder.beginComputePass();
-    pass.setPipeline(pipeline);
     let groups = this.groups.get(pipeline);
     if (!groups) { groups = []; this.groups.set(pipeline, groups); }
     let cached = groups.find(g => g.buffers.every((buffer,i) => buffer === active[i].buffer));
@@ -52,13 +54,26 @@ export class GpuSoap {
       cached = { buffers: active.map(({buffer}) => buffer), group: this.device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: active.map(({buffer,i}) => ({ binding: i, resource: { buffer } })) }) };
       groups.push(cached);
     }
-    pass.setBindGroup(0, cached.group);
-    pass.dispatchWorkgroups(Math.ceil(size / 64)); pass.end();
+    const selected = pipeline, group = cached.group;
+    const command = (encoder: GPUCommandEncoder) => {
+      const pass = encoder.beginComputePass(); pass.setPipeline(selected); pass.setBindGroup(0,group);
+      pass.dispatchWorkgroups(Math.ceil(size / 64)); pass.end();
+    };
+    this.recording?.push(command); command(encoder);
+  }
+  private copy(encoder: GPUCommandEncoder, source: GPUBuffer, sourceOffset: number, destination: GPUBuffer, destinationOffset: number, size: number) {
+    const command = (encoder: GPUCommandEncoder) => encoder.copyBufferToBuffer(source,sourceOffset,destination,destinationOffset,size);
+    this.recording?.push(command); command(encoder);
   }
   private project(encoder: GPUCommandEncoder, tensor: SoapTensor, input: GPUBuffer, offset: number, back: boolean) {
     let current = this.scratch[0], next = this.scratch[1];
-    encoder.copyBufferToBuffer(input, offset * 4, current, 0, tensor.length * 4);
-    for (const axis of tensor.axes) {
+    this.copy(encoder,input,offset*4,current,0,tensor.length*4);
+    // Every size-one axis has the same scalar Gram and ±1 basis. Pairs
+    // cancel exactly; avoid eight redundant projection passes per 1x1 weight.
+    const unitAxes = tensor.axes.filter(axis => axis.dimension === 1);
+    const axes = tensor.axes.filter(axis => axis.dimension !== 1);
+    if (unitAxes.length % 2) axes.push(unitAxes[0]);
+    for (const axis of axes) {
       const { dimension: d, stride: s, basis: q } = axis;
       this.dispatch(encoder, tensor.length, `
         let block = i / ${d * s}u; let destination = (i / ${s}u) % ${d}u; let suffix = i % ${s}u;
@@ -73,11 +88,19 @@ export class GpuSoap {
     return current;
   }
   /** Gradient is already packed in the same CHW/OIHW order as Rust. */
-  async update(gradient: GPUBuffer, step: number, learningRate: number) {
-    const f = (value: number) => { if (!Number.isFinite(value)) throw new Error('Non-finite SOAP scalar'); return `${Math.fround(value).toExponential(12)}`; };
-    const scale = (beta1: number, beta2: number) => learningRate * Math.sqrt(1 - beta2 ** (step + 1)) / (1 - beta1 ** (step + 1));
-    this.device.queue.writeBuffer(this.scalars, 0, new Float32Array(step < 0 ? [0, 0, 0] : [scale(0.95, 0.95), scale(0.9, 0.999), learningRate * 0.01]));
-    let encoder = this.device.createCommandEncoder();
+  async encodeUpdate(encoder: GPUCommandEncoder, gradient: GPUBuffer, step: number, configurations: GPUBuffer, configurationOffset: number) {
+    const f = (value: number) => `${Math.fround(value).toExponential(12)}`;
+    // Copy rates in command order. Host writeBuffer calls would overwrite the
+    // rates for earlier iterations queued in this same command encoder.
+    encoder.copyBufferToBuffer(configurations, configurationOffset * 4, this.scalars, 0, 12);
+    const initial = step < 0, refresh = !initial && (step + 1) % 10 === 0;
+    if (!initial && !refresh) {
+      if (this.recorded?.gradient === gradient) {
+        for (const command of this.recorded.commands) command(encoder);
+        return encoder;
+      }
+      this.recording = [];
+    }
     // The network has few parameters relative to its latents. Reproduce the
     // reference's per-tensor norm order, without reading a norm back to JS.
     const norm = this.layout.tensors.filter(t => !t.latent).map(t => `{
@@ -85,7 +108,6 @@ export class GpuSoap {
       let n = sqrt(squared); total += n*n;
     }`).join('\n');
     this.dispatch(encoder, 1, `var total = 0.0; ${norm} b1[0] = min(1.0, 0.1 / (sqrt(total) + 0.000001));`, [gradient, this.clip], [1]);
-    const initial = step < 0, refresh = !initial && (step + 1) % 10 === 0;
     for (const tensor of this.layout.tensors) {
       const { offset: p, length: n, first: m, second: v, latent } = tensor;
       if (!initial && !tensor.axes.length) {
@@ -116,12 +138,12 @@ export class GpuSoap {
           b0[${m}u+i] = first; b0[${v}u+i] = second;
           b2[i] = first / (sqrt(second) + 1.0e-8);`, [this.state, projected, normalized], [0, 2]);
         // A copy into scratch[2] avoids aliasing the ping-pong projection.
-        encoder.copyBufferToBuffer(normalized, 0, this.scratch[2], 0, n * 4);
+        this.copy(encoder,normalized,0,this.scratch[2],0,n*4);
         const update = this.project(encoder, tensor, this.scratch[2], 0, true);
         this.dispatch(encoder, n, `var value = b0[${p}u+i] - b2[${latent ? 1 : 0}] * b1[i]; value -= ${latent ? '0.0' : 'b2[2]'} * value; b0[${p}u+i] = value;`, [this.state, update, this.scalars], [0]);
         if (tensor.axes.length) {
           const moment = this.project(encoder, tensor, this.state, m, true);
-          encoder.copyBufferToBuffer(moment, 0, this.scratch[3], p * 4, n * 4);
+          this.copy(encoder,moment,0,this.scratch[3],p*4,n*4);
         }
       }
       for (const axis of tensor.axes) {
@@ -139,16 +161,14 @@ export class GpuSoap {
       // refresh case must first read the small Gram matrices for Rust's QR.
       if (!initial && !refresh && tensor.axes.length) {
         const moment = this.project(encoder, tensor, this.scratch[3], p, false);
-        encoder.copyBufferToBuffer(moment, 0, this.state, m * 4, n * 4);
+        this.copy(encoder,moment,0,this.state,m*4,n*4);
       }
     }
-    this.device.queue.submit([encoder.finish()]);
     if (initial || refresh) {
       // Read only Gram matrices, not all parameters, gradients or latents.
       const axes = this.layout.tensors.flatMap(t => t.axes);
       const count = axes.reduce((n, a) => n + a.dimension ** 2, 0);
       if (count) {
-        encoder = this.device.createCommandEncoder();
         let offset = 0;
         for (const axis of axes) { encoder.copyBufferToBuffer(this.state, axis.gram * 4, this.staging, offset * 4, axis.dimension ** 2 * 4); offset += axis.dimension ** 2; }
         this.device.queue.submit([encoder.finish()]);
@@ -167,7 +187,7 @@ export class GpuSoap {
         }
         encoder = this.device.createCommandEncoder();
         if (refresh) for (const tensor of this.layout.tensors) {
-          for (const axis of tensor.axes) {
+          for (const axis of tensor.axes.filter(axis => axis.dimension !== 1)) {
             this.dispatch(encoder, tensor.length, `
               let block = i / ${axis.dimension*axis.stride}u; let destination = (i / ${axis.stride}u) % ${axis.dimension}u; let suffix = i % ${axis.stride}u;
               let source = u32(b0[${axis.order}u + destination]);
@@ -179,9 +199,10 @@ export class GpuSoap {
             encoder.copyBufferToBuffer(moment, 0, this.state, tensor.first * 4, tensor.length * 4);
           }
         }
-        this.device.queue.submit([encoder.finish()]);
       }
     }
+    if (this.recording) { this.recorded = {gradient,commands:this.recording}; this.recording = undefined; }
+    return encoder;
   }
   async download() {
     const encoder = this.device.createCommandEncoder();
@@ -192,6 +213,6 @@ export class GpuSoap {
     finally { this.staging.unmap(); }
   }
   dispose() {
-    this.state.destroy(); this.clip.destroy(); this.scalars.destroy(); this.staging.destroy(); this.scratch.forEach(b => b.destroy()); this.pipelines.clear(); this.groups.clear();
+    this.state.destroy(); this.clip.destroy(); this.scalars.destroy(); this.staging.destroy(); this.scratch.forEach(b => b.destroy()); this.pipelines.clear(); this.groups.clear(); this.recorded = undefined;
   }
 }

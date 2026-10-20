@@ -35,7 +35,9 @@ Frozen parameter groups stay frozen; fixture checks can request raw derivatives.
 
 `coolchic-tensor-replay.ts` records differentiated command plans and pins their
 buffers for reuse. Later iterations update inputs and replay pipelines/bind
-groups without rebuilding the autodiff graph. Training and evaluation plans are
+groups without rebuilding the autodiff graph. Optimizer commands are cached too;
+noise and learning-rate data upload once per batch, and complete iterations share
+a command encoder until a SOAP basis refresh or batch boundary. Training and evaluation plans are
 cached separately so validation does not discard the training plan. Target/common tensors stay cached
 until the graph descriptor changes. Gradient sums use bounded four-input groups
 to respect WebGPU storage-binding limits. Device validation errors are checked.

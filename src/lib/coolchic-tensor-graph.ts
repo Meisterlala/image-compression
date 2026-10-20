@@ -86,6 +86,7 @@ export class CoolChicTensorGraph {
   private recorder!: TensorReplay;
   private plans = new Map<boolean, { key: string; graph: CapturedTensorGradient }>();
   private optimizer?: GpuSoap;
+  private batchInputs?: { noise: GPUBuffer; scalars: GPUBuffer; bytes: number };
   private running = false;
   private disposed = false;
   private target: T4;
@@ -254,7 +255,7 @@ export class CoolChicTensorGraph {
     step: number, iterations: number, learningRate: number, basis: SoapBasis): Promise<Float32Array> {
     if (gpuFailure) throw new Error(gpuFailure);
     if (this.disposed || this.running) throw new Error('GPU graph is disposed or busy');
-    if (!Number.isInteger(iterations) || iterations < 1 || iterations > 8 || state.length !== layout.size ||
+    if (!Number.isInteger(iterations) || iterations < 1 || iterations > 8 || !Number.isInteger(step) || step < -1 || !Number.isFinite(learningRate) || learningRate < 0 || state.length !== layout.size ||
         layout.parameters !== this.parameterCount + this.latentCount || noise.length !== this.latentCount * iterations) throw new Error('Invalid GPU training batch');
     this.running = true;
     const device = (tf.backend() as WebGPUBackend).device;
@@ -262,12 +263,31 @@ export class CoolChicTensorGraph {
     try {
       this.optimizer ??= new GpuSoap(device, layout, basis);
       this.optimizer.upload(state);
+      const noiseValues = options.mode === 4 ? noise.subarray(0,this.latentCount) : noise;
+      if (!this.batchInputs || this.batchInputs.bytes < noiseValues.byteLength) {
+        this.batchInputs?.noise.destroy(); this.batchInputs?.scalars.destroy();
+        this.batchInputs = {
+          bytes: noiseValues.byteLength,
+          noise: device.createBuffer({size:noiseValues.byteLength,usage:GPUBufferUsage.COPY_SRC|GPUBufferUsage.COPY_DST}),
+          scalars: device.createBuffer({size:8*3*4,usage:GPUBufferUsage.COPY_SRC|GPUBufferUsage.COPY_DST}),
+        };
+      }
+      const configurations = new Float32Array(iterations*3);
+      for (let i=0;i<iterations;i++) {
+        const update = step+i+1;
+        const scale = (b1: number,b2: number) => update ? learningRate*Math.sqrt(1-b2**update)/(1-b1**update) : 0;
+        configurations.set([scale(0.95,0.95),scale(0.9,0.999),learningRate*0.01],i*3);
+      }
+      device.queue.writeBuffer(this.batchInputs.noise,0,new Float32Array(noiseValues));
+      device.queue.writeBuffer(this.batchInputs.scalars,0,configurations);
+      let encoder = device.createCommandEncoder();
       for (let i = 0; i < iterations; i++) {
         const values = noise.subarray(i * this.latentCount, (i+1) * this.latentCount);
         await this.computeGradient(state.subarray(0,this.parameterCount), state.subarray(this.parameterCount,layout.parameters), values, options, false, false, true);
-        const gradient = this.plans.get(false)!.graph.runDevice(this.optimizer.state, this.parameterCount, values);
-        await this.optimizer.update(gradient, step < 0 ? i - 1 : step + i, learningRate);
+        const gradient = this.plans.get(false)!.graph.encodeDevice(encoder,this.optimizer.state,this.parameterCount,this.batchInputs.noise,options.mode === 4 ? 0 : i*this.latentCount);
+        encoder = await this.optimizer.encodeUpdate(encoder,gradient,step+i,this.batchInputs.scalars,i*3);
       }
+      device.queue.submit([encoder.finish()]);
       const result = await this.optimizer.download();
       if (result.some(v => !Number.isFinite(v))) throw new Error('Non-finite GPU optimizer state');
       return result;
@@ -351,7 +371,7 @@ export class CoolChicTensorGraph {
         if (!evaluation) prepare(this.noiseVars[i], 'noise', offset);
         offset += this.latentVars[i].size;
       }
-      const capture = this.recorder.capture(build);
+      const capture = this.recorder.capture(build, inputs.map(input => input.buffer));
       packed = capture.value;
       const output = backend.tensorMap.get(packed.dataId).resource as GPUBuffer;
       this.plans.set(evaluation, { key, graph: new CapturedTensorGradient(backend.device, capture.batches, output, packed.size, inputs, capture.release) });
@@ -368,6 +388,7 @@ export class CoolChicTensorGraph {
     this.latentVars?.forEach(v => v.dispose()); this.noiseVars?.forEach(v => v.dispose()); this.target?.dispose(); this.common?.dispose();
     for (const tensor of this.constants.values()) tensor.dispose(); this.constants.clear();
     this.optimizer?.dispose(); this.optimizer = undefined;
+    this.batchInputs?.noise.destroy(); this.batchInputs?.scalars.destroy(); this.batchInputs = undefined;
     for (const plan of this.plans.values()) plan.graph.dispose(); this.plans.clear(); this.recorder?.dispose();
   }
 }

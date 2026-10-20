@@ -46,13 +46,16 @@ export class TensorReplay {
     const backend = this.backend as unknown as { commandEncoder?: GPUCommandEncoder; endComputePassEncoder(): void; submitQueue(): void };
     if (backend.commandEncoder) { backend.endComputePassEncoder(); backend.submitQueue(); }
   }
-  capture<T>(build: () => T): { value: T; batches: Batch[]; release: () => void } {
+  capture<T>(build: () => T, inputs: GPUBuffer[] = []): { value: T; batches: Batch[]; release: () => void } {
     if (this.collecting) throw new Error('Nested GPU capture');
     this.flush();
     const device = this.backend.device, queue = device.queue;
     const originalEncoder = device.createCommandEncoder, originalBindGroup = device.createBindGroup, originalSubmit = queue.submit;
     const buffers = new Set<GPUBuffer>(), recorded = new Map<GPUCommandBuffer, Encode[]>(), batches: Batch[] = [];
     this.collecting = buffers;
+    // Even unused inputs are written during replay. Keep them out of the pool
+    // while another cached plan reassigns its TensorFlow variables.
+    for (const input of inputs) this.pin(input);
     device.createBindGroup = descriptor => {
       const entries = Array.from(descriptor.entries);
       for (const entry of entries) if ('buffer' in entry.resource) this.pin(entry.resource.buffer);
@@ -136,18 +139,16 @@ export class CapturedTensorGradient {
     for (const batch of this.batches) for (const command of batch.commands) command(encoder);
   }
   /** No mapAsync/readback: the optimizer consumes gradients directly. */
-  runDevice(state: GPUBuffer, parameterCount: number, noise: Float32Array) {
-    const encoder = this.device.createCommandEncoder();
+  encodeDevice(encoder: GPUCommandEncoder, state: GPUBuffer, parameterCount: number, noise: GPUBuffer, noiseOffset: number) {
     for (const input of this.inputs) {
       if (input.kind === 'noise') {
-        this.device.queue.writeBuffer(input.buffer, 0, new Float32Array(noise.subarray(input.offset, input.offset + input.length)));
+        encoder.copyBufferToBuffer(noise, (noiseOffset + input.offset) * 4, input.buffer, 0, input.length * 4);
       } else {
         const offset = input.offset + (input.kind === 'latents' ? parameterCount : 0);
         encoder.copyBufferToBuffer(state, offset * 4, input.buffer, 0, input.length * 4);
       }
     }
     this.encode(encoder);
-    this.device.queue.submit([encoder.finish()]);
     return this.output;
   }
   dispose() { this.staging.destroy(); this.release(); }
