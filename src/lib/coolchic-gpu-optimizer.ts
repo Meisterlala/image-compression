@@ -14,12 +14,15 @@ export class GpuSoap {
   private scalars: GPUBuffer;
   private staging: GPUBuffer;
   private pipelines = new Map<string, GPUComputePipeline>();
+  private groups = new Map<GPUComputePipeline, { buffers: GPUBuffer[]; group: GPUBindGroup }[]>();
   private bases = new Map<SoapAxis, Float32Array>();
   constructor(private device: GPUDevice, readonly layout: SoapLayout, private basis: SoapBasis) {
     const allocate = (size: number, usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST) => device.createBuffer({ size: Math.max(4, size * 4), usage });
     this.state = allocate(layout.size);
-    const largest = Math.max(...layout.tensors.map(t => t.length));
-    this.scratch = [allocate(largest), allocate(largest), allocate(largest), allocate(layout.parameters)];
+    const preconditioned = layout.tensors.filter(t => t.axes.length);
+    const largest = Math.max(1, ...preconditioned.map(t => t.length));
+    const moments = Math.max(1, ...preconditioned.map(t => t.offset + t.length));
+    this.scratch = [allocate(largest), allocate(largest), allocate(largest), allocate(moments)];
     this.clip = allocate(1);
     this.scalars = allocate(3);
     this.staging = allocate(layout.size, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST);
@@ -42,7 +45,14 @@ export class GpuSoap {
     }
     const pass = encoder.beginComputePass();
     pass.setPipeline(pipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: active.map(({buffer,i}) => ({ binding: i, resource: { buffer } })) }));
+    let groups = this.groups.get(pipeline);
+    if (!groups) { groups = []; this.groups.set(pipeline, groups); }
+    let cached = groups.find(g => g.buffers.every((buffer,i) => buffer === active[i].buffer));
+    if (!cached) {
+      cached = { buffers: active.map(({buffer}) => buffer), group: this.device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: active.map(({buffer,i}) => ({ binding: i, resource: { buffer } })) }) };
+      groups.push(cached);
+    }
+    pass.setBindGroup(0, cached.group);
     pass.dispatchWorkgroups(Math.ceil(size / 64)); pass.end();
   }
   private project(encoder: GPUCommandEncoder, tensor: SoapTensor, input: GPUBuffer, offset: number, back: boolean) {
@@ -78,6 +88,20 @@ export class GpuSoap {
     const initial = step < 0, refresh = !initial && (step + 1) % 10 === 0;
     for (const tensor of this.layout.tensors) {
       const { offset: p, length: n, first: m, second: v, latent } = tensor;
+      if (!initial && !tensor.axes.length) {
+        // Latents dominate the parameter count, but have no SOAP projections.
+        // Fuse their Adam-like moments and parameter update in one pass.
+        const beta1 = latent ? 0.9 : 0.95, beta2 = latent ? 0.999 : 0.95;
+        this.dispatch(encoder, n, `
+          let g = b1[${p}u+i] * ${latent ? '1.0' : 'b3[0]'};
+          let first = ${f(beta1)} * b0[${m}u+i] + ${f(1-beta1)} * g;
+          let second = ${f(beta2)} * b0[${v}u+i] + ${f(1-beta2)} * g * g;
+          b0[${m}u+i] = first; b0[${v}u+i] = second;
+          var value = b0[${p}u+i] - b2[${latent ? 1 : 0}] * (first / (sqrt(second) + 1.0e-8));
+          value -= ${latent ? '0.0' : 'b2[2]'} * value; b0[${p}u+i] = value;
+        `, [this.state, gradient, this.scalars, this.clip], [0]);
+        continue;
+      }
       if (!initial) {
         this.dispatch(encoder, n, `b2[i] = b0[${p}u+i] * ${latent ? '1.0' : 'b1[0]'};`, [gradient, this.clip, this.scratch[2]], [2]);
         // project() uses the first two scratch buffers; retain the clipped
@@ -131,14 +155,12 @@ export class GpuSoap {
         await this.staging.mapAsync(GPUMapMode.READ, 0, count * 4);
         const values = new Float32Array(this.staging.getMappedRange(0, count * 4).slice(0)); this.staging.unmap();
         offset = 0;
-        const orders = new Map<SoapAxis, Float32Array>();
         for (const axis of axes) {
           const length = axis.dimension ** 2;
           const result = this.basis(values.subarray(offset, offset + length), initial ? undefined : this.bases.get(axis));
           const basis = result.slice(0, length); this.bases.set(axis, basis);
           this.device.queue.writeBuffer(this.state, axis.basis * 4, basis);
           if (refresh) {
-            orders.set(axis, result.slice(length));
             this.device.queue.writeBuffer(this.state, axis.order * 4, result.slice(length));
           }
           offset += length;
@@ -170,6 +192,6 @@ export class GpuSoap {
     finally { this.staging.unmap(); }
   }
   dispose() {
-    this.state.destroy(); this.clip.destroy(); this.scalars.destroy(); this.staging.destroy(); this.scratch.forEach(b => b.destroy()); this.pipelines.clear();
+    this.state.destroy(); this.clip.destroy(); this.scalars.destroy(); this.staging.destroy(); this.scratch.forEach(b => b.destroy()); this.pipelines.clear(); this.groups.clear();
   }
 }

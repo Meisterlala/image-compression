@@ -112,7 +112,7 @@ export class TensorReplay {
 
 export class CapturedTensorGradient {
   private staging: GPUBuffer;
-  constructor(private device: GPUDevice, private batches: Batch[], private output: GPUBuffer,
+  constructor(private device: GPUDevice, private batches: Batch[], readonly output: GPUBuffer,
     private count: number, private inputs: GraphInputBuffer[], private release: () => void) {
     if (!batches.length) throw new Error('Empty GPU execution graph');
     this.staging = device.createBuffer({ size: count * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -124,15 +124,31 @@ export class CapturedTensorGradient {
       if (!(values.buffer instanceof ArrayBuffer)) values = new Float32Array(values);
       this.device.queue.writeBuffer(input.buffer, 0, values as Float32Array<ArrayBuffer>);
     }
-    for (let index = 0; index < this.batches.length; index++) {
-      const encoder = this.device.createCommandEncoder();
-      for (const command of this.batches[index].commands) command(encoder);
-      if (index === this.batches.length - 1) encoder.copyBufferToBuffer(this.output, 0, this.staging, 0, this.count * 4);
-      this.device.queue.submit([encoder.finish()]);
-    }
+    const encoder = this.device.createCommandEncoder();
+    this.encode(encoder);
+    encoder.copyBufferToBuffer(this.output, 0, this.staging, 0, this.count * 4);
+    this.device.queue.submit([encoder.finish()]);
     await this.staging.mapAsync(GPUMapMode.READ);
     try { return new Float32Array(this.staging.getMappedRange(0, this.count * 4).slice(0)); }
     finally { this.staging.unmap(); }
+  }
+  private encode(encoder: GPUCommandEncoder) {
+    for (const batch of this.batches) for (const command of batch.commands) command(encoder);
+  }
+  /** No mapAsync/readback: the optimizer consumes gradients directly. */
+  runDevice(state: GPUBuffer, parameterCount: number, noise: Float32Array) {
+    const encoder = this.device.createCommandEncoder();
+    for (const input of this.inputs) {
+      if (input.kind === 'noise') {
+        this.device.queue.writeBuffer(input.buffer, 0, new Float32Array(noise.subarray(input.offset, input.offset + input.length)));
+      } else {
+        const offset = input.offset + (input.kind === 'latents' ? parameterCount : 0);
+        encoder.copyBufferToBuffer(state, offset * 4, input.buffer, 0, input.length * 4);
+      }
+    }
+    this.encode(encoder);
+    this.device.queue.submit([encoder.finish()]);
+    return this.output;
   }
   dispose() { this.staging.destroy(); this.release(); }
 }

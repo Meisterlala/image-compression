@@ -9,16 +9,20 @@ portable CPU decoder on the emitted `.cool` bytes.
 - **CPU:** SIMD is always enabled. Larger images use a separate shared-memory
   WASM module with up to 16 Rayon workers, leaving one hardware thread free when
   more than two are available. Small images skip pool/GPU startup.
-- **GPU:** complete forward/backward graphs and hard-round rate-distortion
-  evaluations run on-device. Rust retains SOAP/Adam updates, clipping, schedules,
-  RNG, checkpoints, greedy quantization decisions and entropy coding. The GPU
-  toggle disables this path without disabling CPU threading.
+- **GPU:** forward/backward graphs, clipping, SOAP/Adam updates and hard-round
+  rate-distortion evaluations run on-device. Training queues up to eight complete
+  iterations with weights and optimizer moments resident on the GPU. Only small
+  SOAP eigendecomposition/QR problems visit WASM (initially and every ten updates).
+  Rust retains schedules, RNG, checkpoints, greedy decisions and entropy coding.
+  The GPU toggle disables this path without disabling CPU threading.
 
 `src/lib/coolchic.ts` selects the backend. `coolchic-graph-acceleration.ts` bridges
 synchronous WASM to `coolchic-tensor.worker.ts` through shared buffers and bounded
-`Atomics.wait` calls: one synchronization per graph, not per convolution.
-Initialization allows 30 seconds; compute allows 60 seconds; transfers are capped
-at 256 MiB. Failures disable the GPU bridge and training continues on CPU.
+`Atomics.wait` calls: one synchronization per training batch or RD evaluation.
+Batches stop at validation/schedule boundaries and shrink to fit the 256 MiB
+transfer cap. Initialization allows 30 seconds; compute allows 60 seconds.
+Complete optimizer state returns at batch boundaries; failed batches leave CPU
+weights, moments and RNG untouched, allowing safe CPU continuation.
 Progress and saved result notices report actual backend use.
 
 ## GPU implementation
@@ -31,7 +35,8 @@ Frozen parameter groups stay frozen; fixture checks can request raw derivatives.
 
 `coolchic-tensor-replay.ts` records differentiated command plans and pins their
 buffers for reuse. Later iterations update inputs and replay pipelines/bind
-groups without rebuilding the autodiff graph. Target/common tensors stay cached
+groups without rebuilding the autodiff graph. Training and evaluation plans are
+cached separately so validation does not discard the training plan. Target/common tensors stay cached
 until the graph descriptor changes. Gradient sums use bounded four-input groups
 to respect WebGPU storage-binding limits. Device validation errors are checked.
 

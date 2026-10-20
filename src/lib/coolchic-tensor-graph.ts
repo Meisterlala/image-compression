@@ -5,6 +5,7 @@ import '@tensorflow/tfjs-backend-webgpu';
 import type { WebGPUBackend } from '@tensorflow/tfjs-backend-webgpu';
 import { addN as gpuAddN } from '@tensorflow/tfjs-backend-webgpu/dist/kernels/AddN';
 import { TensorReplay, CapturedTensorGradient, type GraphInputBuffer } from './coolchic-tensor-replay';
+import { GpuSoap, type SoapLayout, type SoapBasis } from './coolchic-gpu-optimizer';
 import { registerFusedCoolChicKernels, fusedClippedMse, fusedImageQuant, fusedExpand, fusedQuantize, fusedRate, fusedContext, fusedFilter, fusedConvolution } from './coolchic-tensor-fused';
 
 export interface GraphArchitecture {
@@ -42,8 +43,15 @@ async function initialize() {
   await tf.ready();
   registerFusedCoolChicKernels();
   const device = (tf.backend() as WebGPUBackend).device;
-  device.addEventListener('uncapturederror', event => { gpuFailure = event.error.message; });
-  void device.lost.then(info => { gpuFailure = info.message || 'WebGPU device lost'; });
+  device.addEventListener('uncapturederror', event => {
+    // Keep the original failure, not a later "parent device is lost" symptom.
+    gpuFailure ??= event.error.message;
+  });
+  void device.lost.then(info => {
+    const message = `Cool-chic WebGPU device lost (${info.reason}): ${info.message || 'No details provided by the browser'}`;
+    gpuFailure ??= message;
+    console.error(message);
+  });
   // TFJS 4.22's AddN binds every operand at once, exceeding WebGPU's default
   // 8-storage-buffer limit for shared ARM gradients / >7 latent rates. Reduce
   // in bounded groups instead; no CPU handoff and no larger adapter required.
@@ -66,9 +74,9 @@ async function initialize() {
   } });
 }
 
-/** The full reference forward/backward graph is queued on the GPU. Only raw
- * parameter/latent gradients return to Rust, once per iteration. The existing
- * Rust SOAP/Adam, clipping, RNG, checkpoints and RD search are unchanged. */
+/** The reference graph and SOAP/Adam updates stay on the GPU within a training
+ * batch. Rust receives resumable optimizer state at batch boundaries and retains
+ * schedules, RNG, checkpoints and RD search decisions. */
 export class CoolChicTensorGraph {
   private refs: Parameter[] = [];
   private vars = new Map<string, tf.Variable>();
@@ -76,7 +84,8 @@ export class CoolChicTensorGraph {
   private latentVars: tf.Variable[];
   private noiseVars: tf.Variable[];
   private recorder!: TensorReplay;
-  private plan?: { key: string; graph: CapturedTensorGradient };
+  private plans = new Map<boolean, { key: string; graph: CapturedTensorGradient }>();
+  private optimizer?: GpuSoap;
   private running = false;
   private disposed = false;
   private target: T4;
@@ -241,6 +250,35 @@ export class CoolChicTensorGraph {
     const rate = tf.addN(rates.map(r => r.sum())).div(a.height * a.width);
     return { image, rates, mse, rate, loss: mse.add(rate.mul(options.lambda)) as tf.Scalar };
   }
+  async train(state: Float32Array, noise: Float32Array, options: GraphOptions, layout: SoapLayout,
+    step: number, iterations: number, learningRate: number, basis: SoapBasis): Promise<Float32Array> {
+    if (gpuFailure) throw new Error(gpuFailure);
+    if (this.disposed || this.running) throw new Error('GPU graph is disposed or busy');
+    if (!Number.isInteger(iterations) || iterations < 1 || iterations > 8 || state.length !== layout.size ||
+        layout.parameters !== this.parameterCount + this.latentCount || noise.length !== this.latentCount * iterations) throw new Error('Invalid GPU training batch');
+    this.running = true;
+    const device = (tf.backend() as WebGPUBackend).device;
+    device.pushErrorScope('validation');
+    try {
+      this.optimizer ??= new GpuSoap(device, layout, basis);
+      this.optimizer.upload(state);
+      for (let i = 0; i < iterations; i++) {
+        const values = noise.subarray(i * this.latentCount, (i+1) * this.latentCount);
+        await this.computeGradient(state.subarray(0,this.parameterCount), state.subarray(this.parameterCount,layout.parameters), values, options, false, false, true);
+        const gradient = this.plans.get(false)!.graph.runDevice(this.optimizer.state, this.parameterCount, values);
+        await this.optimizer.update(gradient, step < 0 ? i - 1 : step + i, learningRate);
+      }
+      const result = await this.optimizer.download();
+      if (result.some(v => !Number.isFinite(v))) throw new Error('Non-finite GPU optimizer state');
+      return result;
+    } finally {
+      try {
+        const error = await device.popErrorScope();
+        if (error) throw new Error(error.message);
+        if (gpuFailure) throw new Error(gpuFailure);
+      } finally { this.running = false; }
+    }
+  }
   async gradient(parameters: Float32Array, latents: Float32Array, noise: Float32Array, options: GraphOptions, debug = false): Promise<Float32Array> {
     return this.execute(parameters, latents, noise, options, debug, false);
   }
@@ -266,11 +304,12 @@ export class CoolChicTensorGraph {
       } finally { this.running = false; }
     }
   }
-  private async computeGradient(parameters: Float32Array, latents: Float32Array, noise: Float32Array, options: GraphOptions, debug: boolean, evaluation: boolean): Promise<Float32Array> {
+  private async computeGradient(parameters: Float32Array, latents: Float32Array, noise: Float32Array, options: GraphOptions, debug: boolean, evaluation: boolean, deviceOnly = false): Promise<Float32Array> {
     if (parameters.length !== this.parameterCount || latents.length !== this.latentCount || noise.length !== (evaluation ? 0 : this.latentCount)) throw new Error('Tensor graph payload length mismatch');
     const key = JSON.stringify([evaluation, options.mode, options.temperature, options.normalizer, options.lambda]);
-    if (!debug && this.plan?.key === key) return this.plan.graph.run(parameters, latents, noise);
-    if (!debug) { this.plan?.graph.dispose(); this.plan = undefined; }
+    const plan = this.plans.get(evaluation);
+    if (!debug && plan?.key === key) return deviceOnly ? new Float32Array(0) : plan.graph.run(parameters, latents, noise);
+    if (!debug) { plan?.graph.dispose(); this.plans.delete(evaluation); }
     tf.tidy(() => {
       const offsets = [0]; for (const n of this.spec.group_lengths) offsets.push(offsets[offsets.length - 1] + n);
       for (const p of this.refs) this.parameter(p).assign(tf.tensor1d(new Float32Array(parameters.subarray(offsets[p.group] + p.offset, offsets[p.group] + p.offset + p.length))));
@@ -315,10 +354,10 @@ export class CoolChicTensorGraph {
       const capture = this.recorder.capture(build);
       packed = capture.value;
       const output = backend.tensorMap.get(packed.dataId).resource as GPUBuffer;
-      this.plan = { key, graph: new CapturedTensorGradient(backend.device, capture.batches, output, packed.size, inputs, capture.release) };
+      this.plans.set(evaluation, { key, graph: new CapturedTensorGradient(backend.device, capture.batches, output, packed.size, inputs, capture.release) });
     }
     try {
-      const result = await packed.data() as Float32Array;
+      const result = deviceOnly ? new Float32Array(0) : await packed.data() as Float32Array;
       if ((tf.backend() as WebGPUBackend).memory().numBytesAllocatedInGPU > 3 * 1024 ** 3) throw new Error('Tensor graph exceeded GPU memory budget');
       return result;
     } finally { packed.dispose(); }
@@ -328,6 +367,7 @@ export class CoolChicTensorGraph {
     for (const variable of this.vars.values()) variable.dispose(); this.vars.clear();
     this.latentVars?.forEach(v => v.dispose()); this.noiseVars?.forEach(v => v.dispose()); this.target?.dispose(); this.common?.dispose();
     for (const tensor of this.constants.values()) tensor.dispose(); this.constants.clear();
-    this.plan?.graph.dispose(); this.plan = undefined; this.recorder?.dispose();
+    this.optimizer?.dispose(); this.optimizer = undefined;
+    for (const plan of this.plans.values()) plan.graph.dispose(); this.plans.clear(); this.recorder?.dispose();
   }
 }

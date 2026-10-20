@@ -1,5 +1,5 @@
-//! One GPU forward/backward graph per iteration, not one host synchronization
-//! per operator. The reference optimizer, schedule and bitstream remain Rust.
+//! GPU graphs and optimizer batches, with one host synchronization per batch.
+//! Rust retains schedules, checkpoints and bitstreams, plus the CPU fallback.
 use super::{Tensor, network::Network, quantizer::Quantizer};
 
 pub struct ParameterGradient {
@@ -170,11 +170,65 @@ mod browser {
             latents: gradients,
         })
     }
+    pub fn training_batch(
+        network: &Network,
+        target: &Tensor,
+        state: &[f32],
+        noise: &[f32],
+        options: &[f32],
+        layout: serde_json::Value,
+    ) -> Option<Vec<f32>> {
+        let callback = BACKEND.with_borrow(Clone::clone)?;
+        let mut spec: serde_json::Value = serde_json::from_str(&descriptor(network)).ok()?;
+        spec["optimizer"] = layout;
+        let common: Vec<_> = network
+            .common
+            .iter()
+            .flat_map(|l| l.data.iter().copied())
+            .collect();
+        let response = callback.call7(
+            &JsValue::NULL,
+            &JsValue::from_str(&spec.to_string()),
+            &array(state),
+            &array(&[]),
+            &array(&target.data),
+            &array(noise),
+            &array(&common),
+            &Float32Array::from(options),
+        );
+        let values = response
+            .ok()
+            .and_then(|v| v.dyn_into::<Float32Array>().ok());
+        let result = values
+            .filter(|v| v.length() as usize == state.len())
+            .and_then(|v| {
+                let mut packed = vec![0.0; state.len()];
+                v.copy_to(&mut packed);
+                packed.iter().all(|v| v.is_finite()).then_some(packed)
+            });
+        if result.is_none() {
+            BACKEND.with_borrow_mut(|backend| *backend = None);
+        }
+        result
+    }
+    pub fn available() -> bool {
+        BACKEND.with_borrow(|backend| {
+            backend.as_ref().is_some_and(|callback| {
+                js_sys::Reflect::get(callback, &JsValue::from_str("trainingBatches"))
+                    .ok()
+                    .and_then(|v| v.as_bool())
+                    == Some(true)
+            })
+        })
+    }
     pub fn evaluation(network: &Network, target: &Tensor, lambda: f32) -> Option<f32> {
         // Wire mode 5: hard latents and the reference 8-bit image transform.
         Some(request(network, target, [5.0, 1.0, lambda, 1.0], &[])?.0[0])
     }
 }
+
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+pub(crate) use browser::{available, training_batch};
 
 pub fn evaluation(network: &Network, target: &Tensor, lambda: f32) -> Option<f32> {
     #[cfg(all(feature = "wasm", target_arch = "wasm32"))]

@@ -1,7 +1,8 @@
 import type { TensorGraphSpec } from './coolchic-tensor-graph';
+import type { SoapLayout } from './coolchic-gpu-optimizer';
 export type GraphCallback = (spec: string, parameters: Float32Array, latents: Float32Array, target: Float32Array,
   noise: Float32Array, common: Float32Array, options: Float32Array) => Float32Array | null;
-export interface GraphAcceleration { gradient: GraphCallback; calls: number; evaluations: number; failure?: string; dispose(): void }
+export interface GraphAcceleration { gradient: GraphCallback; calls: number; evaluations: number; batches?: number; failure?: string; dispose(): void }
 export const GRAPH_HEADER = 1024;
 
 /** One bounded worker sleep per complete forward/backward graph. */
@@ -16,19 +17,24 @@ export async function createCoolChicGraphAcceleration(): Promise<GraphAccelerati
       worker.postMessage({ type: 'init' });
     });
   } catch (error) { worker.terminate(); throw error; }
-  let shared: SharedArrayBuffer | undefined, currentSpec: string | undefined, descriptor: TensorGraphSpec | undefined;
+  let shared: SharedArrayBuffer | undefined, currentSpec: string | undefined, descriptor: (TensorGraphSpec & { optimizer?: SoapLayout }) | undefined;
+  let currentGraphKey: string | undefined;
   let disposed = false;
   const backend: GraphAcceleration = {
     calls: 0, evaluations: 0,
     gradient(spec, parameters, latents, target, noise, common, options) {
       if (disposed || backend.failure) return null;
       try {
-      const fresh = spec !== currentSpec;
-      if (fresh) descriptor = JSON.parse(spec) as TensorGraphSpec;
+      if (spec !== currentSpec) descriptor = JSON.parse(spec) as TensorGraphSpec & { optimizer?: SoapLayout };
+      const { optimizer: _optimizer, ...graphDescriptor } = descriptor!;
+      const graphKey = JSON.stringify(graphDescriptor);
+      const fresh = graphKey !== currentGraphKey;
       const expectedParameters = descriptor!.group_lengths.reduce((a,b) => a+b, 0);
       const expectedLatents = descriptor!.latents.reduce((n,l) => n+l.height*l.width, 0);
-      const evaluation = options[0] === 5;
-      if (parameters.length !== expectedParameters || latents.length !== expectedLatents || noise.length !== (evaluation ? 0 : expectedLatents) || options.length !== 4) throw new Error('GPU graph input length mismatch');
+      const evaluation = options[0] === 5, training = options[0] === 6;
+      const iterations = training ? options[7] : 1;
+      if (training ? (options.length !== 8 || !Number.isInteger(iterations) || iterations < 1 || iterations > 8 || parameters.length !== descriptor!.optimizer?.size || latents.length !== 0 || noise.length !== expectedLatents * iterations)
+        : (parameters.length !== expectedParameters || latents.length !== expectedLatents || noise.length !== (evaluation ? 0 : expectedLatents) || options.length !== 4)) throw new Error('GPU graph input length mismatch');
       const inputLength = parameters.length + latents.length + noise.length + (fresh ? target.length + common.length : 0);
       const outputLength = evaluation ? 1 : parameters.length + latents.length;
       const bytes = GRAPH_HEADER + (inputLength + outputLength) * 4;
@@ -47,12 +53,17 @@ export async function createCoolChicGraphAcceleration(): Promise<GraphAccelerati
         worker.terminate(); return null;
       }
       currentSpec = spec;
-      if (evaluation) backend.evaluations++; else backend.calls++;
+      currentGraphKey = graphKey;
+      if (evaluation) backend.evaluations++; else {
+        backend.calls += iterations;
+        if (training) backend.batches = (backend.batches ?? 0) + 1;
+      }
       return new Float32Array(shared, GRAPH_HEADER + inputLength * 4, outputLength);
       } catch (error) { backend.failure = String(error); worker.terminate(); return null; }
     },
     dispose() { disposed = true; worker.terminate(); shared = undefined; },
   };
+  Object.assign(backend.gradient, { trainingBatches: true });
   worker.onerror = event => { backend.failure = event.message || 'GPU tensor worker failed'; };
   return backend;
 }

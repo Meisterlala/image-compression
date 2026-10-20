@@ -166,6 +166,137 @@ impl Runner {
             optimizers,
         })
     }
+    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+    fn gpu_batch(&mut self, target: &Tensor, lambda: f32, random: &mut Random) -> Result<usize> {
+        if !super::graph::available() {
+            return Ok(0);
+        }
+        // Do not cross validation, schedule, early-restore or phase boundaries.
+        let count = 8
+            .min(self.phase.iterations - self.iteration)
+            .min(self.phase.validation_frequency - self.iteration % self.phase.validation_frequency)
+            .min(
+                self.phase
+                    .patience
+                    .saturating_sub(self.iteration - self.last_record)
+                    + 1,
+            );
+        let (temperature, sigma) = self.phase.scheduled_values(self.iteration);
+        let mut rng = random.clone();
+        let n: usize = self.network.latents.iter().map(|l| l.data.len()).sum();
+        let groups = self.network.parameters().0;
+        let mut state: Vec<f32> = groups
+            .iter()
+            .flatten()
+            .copied()
+            .chain(
+                self.network
+                    .latents
+                    .iter()
+                    .flat_map(|l| l.data.iter().copied()),
+            )
+            .collect();
+        let parameters = state.len();
+        let mut offsets = [0; 8];
+        for i in 1..8 {
+            offsets[i] = offsets[i - 1] + groups[i - 1].len();
+        }
+        let mut tensors = Vec::new();
+        for (chunk, optimizer) in self.optimizers.chunks.iter().zip(&self.optimizers.neural) {
+            if let Some(optimizer) = optimizer {
+                tensors.push(optimizer.gpu_pack(
+                    offsets[chunk.group] + chunk.offset,
+                    false,
+                    &mut state,
+                ));
+            }
+        }
+        let mut offset = groups.iter().map(Vec::len).sum();
+        for (latent, optimizer) in self.network.latents.iter().zip(&self.optimizers.latents) {
+            tensors.push(optimizer.gpu_pack(offset, true, &mut state));
+            offset += latent.data.len();
+        }
+        // Include fresh target/common uploads and the returned optimizer state
+        // when fitting the bridge's 256 MiB budget. Large jobs use fewer steps.
+        let fixed = 2 * state.len()
+            + target.data.len()
+            + self
+                .network
+                .common
+                .iter()
+                .map(|l| l.data.len())
+                .sum::<usize>();
+        let capacity = (256 * 1024 * 1024 / 4usize).saturating_sub(256 + fixed);
+        let count = count.min(capacity / n);
+        if count == 0 {
+            return Ok(0);
+        }
+        let mut noise = Vec::with_capacity(n * count);
+        for _ in 0..count {
+            if matches!(self.phase.quantizer, Quantizer::Hard) {
+                noise.resize(noise.len() + n, 0.0);
+            } else {
+                noise.extend(rng.normal_values(n)?.into_iter().map(|v| v * sigma));
+            }
+        }
+        let step = self.optimizers.latents[0].gpu_step();
+        let kind = match self.phase.quantizer {
+            Quantizer::None => 0.0,
+            Quantizer::SoftAlone => 1.0,
+            Quantizer::Soft => 2.0,
+            Quantizer::StraightThrough => 3.0,
+            Quantizer::Hard => 4.0,
+        };
+        let normalizer = if matches!(self.phase.quantizer, Quantizer::Soft | Quantizer::SoftAlone) {
+            (1.0 / (2.0 * temperature)).tanh()
+        } else {
+            1.0
+        };
+        let options = [
+            6.0,
+            temperature,
+            lambda,
+            normalizer,
+            kind,
+            self.phase.learning_rate_at(self.validations) as f32,
+            step as f32,
+            count as f32,
+        ];
+        let layout =
+            serde_json::json!({"size":state.len(),"parameters":parameters,"tensors":tensors});
+        let Some(values) =
+            super::graph::training_batch(&self.network, target, &state, &noise, &options, layout)
+        else {
+            // Failed batches are transactional: CPU parameters, moments and RNG
+            // still describe the last completed batch, so CPU fallback is safe.
+            return Ok(0);
+        };
+        let mut cursor = 0;
+        let next_groups = std::array::from_fn(|i| {
+            let begin = cursor;
+            cursor += groups[i].len();
+            values[begin..cursor].to_vec()
+        });
+        self.network.set_parameters(&next_groups)?;
+        for latent in &mut self.network.latents {
+            let end = cursor + latent.data.len();
+            latent.data.copy_from_slice(&values[cursor..end]);
+            cursor = end;
+        }
+        let next_step = (step + count as i32) as usize;
+        for optimizer in self
+            .optimizers
+            .neural
+            .iter_mut()
+            .flatten()
+            .chain(&mut self.optimizers.latents)
+        {
+            optimizer.gpu_unpack(&values, &mut cursor, next_step);
+        }
+        *random = rng;
+        Ok(count)
+    }
+
     fn step(&mut self, target: &Tensor, lambda: f32, random: &mut Random) -> Result<bool> {
         if self.iteration >= self.phase.iterations {
             return Ok(true);
@@ -178,45 +309,51 @@ impl Runner {
             self.best.restore(&mut self.network)?;
             self.last_record = self.iteration;
         }
-        let (temperature, sigma) = self.phase.scheduled_values(self.iteration);
-        let n = self.network.latents.iter().map(|l| l.data.len()).sum();
-        let noise: Vec<f32> = if matches!(self.phase.quantizer, Quantizer::Hard) {
-            vec![0.0; n]
-        } else {
-            let mut values = random.normal_values(n)?;
-            for value in &mut values {
-                *value *= sigma;
-            }
-            values
-        };
-        let learning_rate = self.phase.learning_rate_at(self.validations);
-        if let Some(gradient) = super::graph::gradient(
-            &self.network,
-            target,
-            lambda,
-            self.phase.quantizer,
-            temperature,
-            &noise,
-        ) {
-            self.optimizers.update_parameters(
-                &mut self.network,
-                gradient.groups,
-                &gradient.latents,
-                learning_rate,
-            )?;
-        } else {
-            let (_, gradient) = self.network.loss_gradient(
+        #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+        let batched = self.gpu_batch(target, lambda, random)?;
+        #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
+        let batched = 0usize;
+        if batched == 0 {
+            let (temperature, sigma) = self.phase.scheduled_values(self.iteration);
+            let n = self.network.latents.iter().map(|l| l.data.len()).sum();
+            let noise: Vec<f32> = if matches!(self.phase.quantizer, Quantizer::Hard) {
+                vec![0.0; n]
+            } else {
+                let mut values = random.normal_values(n)?;
+                for value in &mut values {
+                    *value *= sigma;
+                }
+                values
+            };
+            let learning_rate = self.phase.learning_rate_at(self.validations);
+            if let Some(gradient) = super::graph::gradient(
+                &self.network,
                 target,
                 lambda,
                 self.phase.quantizer,
                 temperature,
                 &noise,
-            )?;
-            self.optimizers
-                .update(&mut self.network, &gradient, learning_rate)?;
+            ) {
+                self.optimizers.update_parameters(
+                    &mut self.network,
+                    gradient.groups,
+                    &gradient.latents,
+                    learning_rate,
+                )?;
+            } else {
+                let (_, gradient) = self.network.loss_gradient(
+                    target,
+                    lambda,
+                    self.phase.quantizer,
+                    temperature,
+                    &noise,
+                )?;
+                self.optimizers
+                    .update(&mut self.network, &gradient, learning_rate)?;
+            }
         }
-        let count = self.iteration;
-        self.iteration += 1;
+        self.iteration += batched.max(1);
+        let count = self.iteration - 1;
         if self
             .iteration
             .is_multiple_of(self.phase.validation_frequency)
