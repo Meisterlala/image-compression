@@ -114,13 +114,13 @@ export class TensorReplay {
 }
 
 export class CapturedTensorGradient {
-  private staging: GPUBuffer;
+  private staging?: GPUBuffer;
   constructor(private device: GPUDevice, private batches: Batch[], readonly output: GPUBuffer,
     private count: number, private inputs: GraphInputBuffer[], private release: () => void) {
     if (!batches.length) throw new Error('Empty GPU execution graph');
-    this.staging = device.createBuffer({ size: count * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   }
   async run(parameters: Float32Array, latents: Float32Array, noise: Float32Array): Promise<Float32Array> {
+    this.staging ??= this.device.createBuffer({ size:this.count*4,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ });
     const sources = { parameters, latents, noise };
     for (const input of this.inputs) {
       let values = sources[input.kind].subarray(input.offset, input.offset + input.length);
@@ -151,5 +151,5 @@ export class CapturedTensorGradient {
     this.encode(encoder);
     return this.output;
   }
-  dispose() { this.staging.destroy(); this.release(); }
+  dispose() { this.staging?.destroy(); this.release(); }
 }

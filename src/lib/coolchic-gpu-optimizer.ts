@@ -31,6 +31,9 @@ export class GpuSoap {
     this.scalars = allocate(3);
     this.staging = allocate(layout.size, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST);
   }
+  get memoryBytes() {
+    return this.state.size + this.clip.size + this.scalars.size + this.staging.size + this.scratch.reduce((n,buffer) => n+buffer.size,0);
+  }
   upload(values: Float32Array) {
     if (values.length !== this.layout.size) throw new Error('Invalid SOAP state length');
     this.device.queue.writeBuffer(this.state, 0, new Float32Array(values));

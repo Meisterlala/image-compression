@@ -284,6 +284,9 @@ export class CoolChicTensorGraph {
       for (let i = 0; i < iterations; i++) {
         const values = noise.subarray(i * this.latentCount, (i+1) * this.latentCount);
         await this.computeGradient(state.subarray(0,this.parameterCount), state.subarray(this.parameterCount,layout.parameters), values, options, false, false, true);
+        if (i === 0 && (tf.backend() as WebGPUBackend).memory().numBytesAllocatedInGPU + this.optimizer.memoryBytes + this.batchInputs.noise.size + this.batchInputs.scalars.size > 3 * 1024 ** 3) {
+          throw new Error('GPU training exceeded the 3 GiB memory budget');
+        }
         const gradient = this.plans.get(false)!.graph.encodeDevice(encoder,this.optimizer.state,this.parameterCount,this.batchInputs.noise,options.mode === 4 ? 0 : i*this.latentCount);
         encoder = await this.optimizer.encodeUpdate(encoder,gradient,step+i,this.batchInputs.scalars,i*3);
       }
