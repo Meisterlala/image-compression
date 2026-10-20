@@ -1,5 +1,5 @@
 //! Still-image architecture descriptors from v5.0.0 cfg/dec/intra/*.cfg and
-//! CoolChicEncoderParameter. No reduced-profile substitutions.
+//! CoolChicEncoderParameter.
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

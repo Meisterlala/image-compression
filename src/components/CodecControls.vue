@@ -56,12 +56,12 @@ const coolchicIterations = computed({
       </div>
       <div class="field">
         <div class="control-heading">
-          <label :for="id('lambda')">Quality</label>
-          <MetricTooltip label="Quality" text="Higher settings preserve more detail but usually make larger files. Lower settings make smaller files and can lose detail. Even the highest setting is not lossless." />
-          <output :for="id('lambda')">{{ Math.round(coolchicRate) }}</output>
+          <label :for="id('lambda')">Rate constraint (λ)</label>
+          <MetricTooltip label="Rate constraint (λ)" text="Higher values favor smaller files at the cost of detail. Lower values favor more detail, usually in larger files. This is not a target bitrate." />
+          <output :for="id('lambda')">{{ settings.coolchicLambda }}</output>
         </div>
-        <input :id="id('lambda')" v-model.number="coolchicRate" type="range" min="0" max="100" step="1" aria-label="Quality" :aria-valuetext="`${Math.round(coolchicRate)} out of 100`">
-        <div class="range-captions"><span>Smaller file</span><span>Higher fidelity</span></div>
+        <input :id="id('lambda')" v-model.number="coolchicRate" type="range" min="0" max="100" step="1" aria-label="Rate constraint (λ)" :aria-valuetext="String(settings.coolchicLambda)">
+        <div class="range-captions"><span>More detail</span><span>Smaller file</span></div>
       </div>
       <div class="field">
         <div class="control-heading">

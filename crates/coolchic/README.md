@@ -1,95 +1,114 @@
-# Experimental CPU-only Cool-chic 5.0 profile
+# Cool-chic v5 RGB codec and reference intra MSE trainer
 
-Self-contained Rust encoder **and** decoder. No Python, GPU, pretrained weights,
-backend, tensor runtime, unsafe code, or architecture-specific intrinsics. Native
-and `wasm32-unknown-unknown` use the same code. The only runtime dependencies are
-`constriction` 0.4.2 (the reference entropy coder) and `probability`.
+Browser-portable Rust implementation of the **v5.0.0 RGB still-image reference
+encoder and decoder**, pinned to Orange-OpenSource/Cool-Chic commit
+`a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6`.
 
-This is a **reduced-profile implementation**, not a port of the full reference
-encoder. It produces real `.cool` files compatible with the official **v5.0.0**
-Python decoder; all per-image network parameters are included in the file.
-The Rust decoder accepts this profile only, not arbitrary reference bitstreams.
-There is no private envelope, PNG fallback, or model sidecar.
+The same code runs natively and in browser WASM. No server, Python, pretrained
+weights or tensor runtime is needed at runtime. Python/PyTorch are used only for
+independent development-time parity checks.
 
-## Implemented profile
+## Encoder
 
-- Single RGB 8-bit intra image, at most 4,000,000 pixels, each dimension < 16384.
-- Three integer latent grids at full, half and quarter resolution; range -64..63.
-- Separable symmetric nearest-neighbor upsampling (4-tap transpose kernels),
-  identity residual pre-concatenation filters (1 tap).
-- Learned 3-input/3-output linear synthesis and identity output transform.
-- Learned six-spatial-context linear Laplace ARM. Fixed-point arithmetic,
-  clipping, probability table and wavefront traversal follow the reference.
-- Reference headers, neural quantization, signed order-k exponential-Golomb
-  coding, and little-endian constriction range stream.
-- Deterministic per-image alternating optimization of latents and synthesis,
-  followed by fitting/quantizing the entropy model. Quality changes latent gain
-  and an L1 rate surrogate; effort changes optimization passes (4–20).
+- Official LOP, MOP, HOP and VHOP intra architectures and adaptive latent and
+  hyperlatent resolutions; learned separable/symmetric upsampling, nonlinear
+  synthesis, residual ARM, IFCE and linear stabilisers.
+- Full analytical forward/backward graph, gain-16 soft/noisy latent quantization
+  and actual Laplace entropy loss with the reference probability floor.
+- Standard intra MSE preset: 5→2→1 warm-up candidates, SOAP network optimizer,
+  Adam-like latent group, global gradient clipping, validation/checkpoint
+  selection, cosine learning-rate and validation-gated noise/temperature schedules,
+  followed by 500 hard-round refinement iterations.
+- Complete greedy neural weight/bias RD quantization and exp-Golomb-order search.
+- Native and browser encode the actual reference `.cool` headers, quantized neural
+  parameters and causal range-coded latent payload. The preview is decoded from
+  these bytes, not copied from the training graph or input image.
 
-**Not implemented:** reference SOAP/autograd training, soft rounding, IFCE
-(inter-feature context extraction), learned upsampling, nonlinear synthesis,
-reference LOP/MOP/HOP presets, hyperlatents, common randomness, video, YUV, or
-high bit depth. No reference RD/perceptual-quality or speed claims apply.
-The restricted synthesis can lose fine color detail even at quality 100; quality
-100 is not lossless. More effort is not guaranteed to improve every metric.
-This is a small interoperable starting point, not the full 5.0 compression system.
+The browser exposes the actual architecture, rate constraint λ and training
+iteration budget. Standard intra training requires at least 2,000 iterations.
+The default browser budget is 2,000; the reference CLI's default is 10,000.
+Larger λ favors smaller files; smaller λ favors detail. This codec is lossy.
 
-## API and validation
+Training initialization and noise use a deterministic local RNG, not PyTorch's
+platform-specific generators. Learned parameters are not promised to be identical
+across Rust, PyTorch, CPUs or GPUs. Module outputs/derivatives, optimizer
+trajectories, preset schedules and quantization decisions are independently
+validated against the pinned source.
+
+## Decoder and scope
+
+The decoder implements integer Q16/Q32 ARM/IFCE, reference probability tables and
+constriction queue coding, hyperlatents, deterministic common randomness,
+learned synthesis and final nearest/bilinear/bicubic interpolation. Golden
+reference-produced files and actual Rust/WASM-trained files are independently
+decoded by the official Python decoder.
+
+Scope is **single 8-bit RGB still images and MSE training**. Video/inter prediction,
+YUV/high-bit-depth I/O, and perceptual Wasserstein training are not exposed by this
+image application. Common-randomness reconstruction is supported by the decoder.
+Inputs are composited on white in the app before encoding; the raw Rust API
+expects already-composited sRGB and ignores alpha.
+
+Browser guardrails: at most **4,000,000 pixels**, each dimension below 16384,
+3 GiB conservative estimated working-buffer budget and 32 MiB input bitstreams.
+Large training jobs require confirmation before candidate allocation. These are
+browser resource limits, not claims about format limits or measured peak RSS.
+Malformed headers, parameter bounds and arithmetic are checked; entropy payloads
+are checked by canonical re-encoding. This is not a hardened hostile-file parser.
+
+## Rust API
 
 ```rust,ignore
-let bytes = coolchic::encode(&rgba, width, height, 75, 5)?;
-let image = coolchic::decode(&bytes)?;
+use coolchic::{encode, decode, EncoderSettings};
+let bytes = encode(&rgba, width, height, EncoderSettings::default())?;
+let image = decode(&bytes)?;
 ```
 
-`Encoder::new`, `step`, and `finish` expose individual optimization passes for
-browser progress. `finish` consumes the encoder and rejects incomplete training.
-Input sizes, settings, header/payload lengths, profile parameters, and neural
-parameter bounds are validated before large decoder allocations. Canonical
-range re-encoding rejects truncated/extended entropy payloads (included in decode
-timing). This is not an authenticated format or a hardened hostile-file parser.
+For bounded browser progress/cancellation, use `Encoder::new`, `step`, `status`,
+`completed`, `total_iterations` and `finish`. Each step performs one real training
+iteration or quantization trial. `finish` rejects incomplete work. Browser cancel
+terminates the worker, including an in-flight WASM call.
+
+## Validation
 
 ```sh
 cargo test --manifest-path crates/coolchic/Cargo.toml
 cargo clippy --manifest-path crates/coolchic/Cargo.toml --all-targets -- -D warnings
-cargo build --manifest-path crates/coolchic/Cargo.toml --target wasm32-unknown-unknown --release
+cargo check --manifest-path crates/coolchic/Cargo.toml --features wasm --target wasm32-unknown-unknown
 ```
 
-`examples/rgba.rs` provides dependency-free native file I/O for raw RGBA buffers.
-The encoder expects already-composited 8-bit sRGB; alpha is ignored (the app
-composites on white before calling WASM).
-
-Golden fixtures generated independently by the official Python writer/decoder
-are checked by normal Cargo tests, including spatial mean/scale contexts,
-raster/wavefront ordering, odd dimensions and cropping. No Python is needed for
-these tests. To additionally test **both directions** against the actual reference:
+Native helpers have no image-I/O dependencies:
 
 ```sh
-# Optional developer-only environment, not an app/runtime dependency:
-git clone --branch v5.0.0 --depth 1 https://github.com/Orange-OpenSource/Cool-Chic.git .cache/coolchic-reference
-uv venv --python 3.12 .cache/coolchic-venv
-uv pip install --python .cache/coolchic-venv/bin/python torch torchvision --index-url https://download.pytorch.org/whl/cpu
-uv pip install --python .cache/coolchic-venv/bin/python numpy einops fvcore ConfigArgParse scipy constriction==0.4.2 matplotlib
-.cache/coolchic-venv/bin/python scripts/verify-coolchic.py --reference .cache/coolchic-reference
+cargo run --release --manifest-path crates/coolchic/Cargo.toml --example reference_train -- input.rgba 32 24 2000 0.001 lop output.cool
+cargo run --release --manifest-path crates/coolchic/Cargo.toml --example reference -- decode output.cool output.rgba
 ```
 
-The script refuses a different upstream commit, verifies exact RGBA agreement
-for five sizes at three Rust quality settings, and independently constructs
-reference-produced files to decode with Rust. `--write-fixtures` regenerates the
-two committed golden cases. Test fixtures contain synthetic pixels, not a dataset.
+To reproduce the independent Python checks, install the pinned upstream's
+requirements (including CPU PyTorch) in a development-only virtual environment:
 
-## Provenance
+```sh
+git clone --depth 1 --branch v5.0.0 https://github.com/Orange-OpenSource/Cool-Chic.git /tmp/coolchic-reference-v5
+# Run with a Python interpreter containing the upstream requirements:
+python scripts/verify-coolchic-operators.py --reference /tmp/coolchic-reference-v5
+python scripts/verify-coolchic-graph.py --reference /tmp/coolchic-reference-v5
+python scripts/verify-coolchic-training.py --reference /tmp/coolchic-reference-v5
+python scripts/verify-coolchic-streams.py --reference /tmp/coolchic-reference-v5
+```
 
-Format and decoder algorithms ported/adapted from Orange-OpenSource/Cool-Chic
-**v5.0.0**, commit `a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6`:
-https://github.com/Orange-OpenSource/Cool-Chic/tree/a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6
+Add `--write-fixtures` only when deliberately regenerating reviewed golden data.
+Normal Rust tests need no Python or network. See `tests/fixtures/README.md`.
 
-Copyright 2023–2026 Orange. Upstream BSD-3-Clause notice is preserved in
-`UPSTREAM-LICENSE.txt` and in the deployed application's legal directory. New
-application/port code is AGPL-3.0-only, consistent with the enclosing project.
+## Provenance and licenses
 
-`src/log_scales.f32le` is the final 2561 float32 values (little endian) from the
-upstream `coolchic/bitstream/component/mu_scale.npy`: `exp(k/256)` for k=-1280..1280,
-**as rounded by upstream PyTorch**. Keeping the exact table avoids entropy
-probability mismatches from different implementations of exp. Means are exact
-multiples of 1/256 and are computed directly. The upstream `_generate_possible_mu_scale.py`
-documents construction of the table. No trained model weights are bundled.
+Reference algorithms and probability-table data: Orange Cool-Chic v5.0.0,
+Copyright 2023–2026 Orange, BSD-3-Clause (`UPSTREAM-LICENSE.txt`).
+SOAP: Copyright 2024 Nikhil Vyas, MIT (`SOAP-LICENSE.txt`), with upstream Orange
+modifications. Portable eigendecomposition/QR uses nalgebra (Apache-2.0).
+New port/application code is AGPL-3.0-only (`LICENSE`). Runtime dependency
+versions are pinned by `Cargo.lock`; notices are deployed under `public/legal/`.
+
+`src/log_scales.f32le` contains the final 2561 float32 entries from upstream
+`coolchic/bitstream/component/mu_scale.npy`, generated as `exp(k/256)` for
+`k=-1280..1280` and rounded by upstream PyTorch. Exact stored values prevent
+probability-table drift between independent encoders and decoders.

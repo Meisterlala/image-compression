@@ -1,7 +1,6 @@
 //! Reference-v5 RGB intra MSE training, neural operators and bitstream I/O.
 //!
-//! This is the application's Cool-chic path. The former reduced encoder has
-//! been removed; historical reduced-profile files remain decodable.
+//! This is the application's Cool-chic encoder and decoder.
 //! Ported from Orange Cool-Chic v5.0.0 (BSD-3-Clause); see UPSTREAM-LICENSE.txt.
 
 pub mod architecture;

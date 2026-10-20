@@ -1,6 +1,6 @@
 //! Learned separable/symmetric filters from component/core/upsampling.py.
-//! Unlike the legacy nearest-neighbour profile, weights and their derivatives
-//! are retained. Transposed convolution uses reference replicate padding/crop.
+//! Includes learned weights and their derivatives. Transposed convolution uses
+//! reference replicate padding/crop.
 use super::Tensor;
 use crate::{Error, Result};
 

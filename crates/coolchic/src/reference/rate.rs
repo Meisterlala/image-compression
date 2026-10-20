@@ -1,6 +1,6 @@
 //! Laplace rate and analytical reverse-mode derivatives from the reference
 //! CoolChicEncoder.forward. The probability floor is a differentiable clamp,
-//! not a detached L1 proxy as used by the legacy reduced encoder.
+//! allowing rate gradients to reach both the latents and entropy model.
 use super::Tensor;
 use crate::{Error, Result};
 

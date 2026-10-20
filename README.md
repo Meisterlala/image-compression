@@ -90,11 +90,12 @@ modifying or redistributing it. External library and model terms also apply.
 - JPEG: quality, progressive mode and chroma subsampling (MozJPEG).
 - AVIF: quality, effort, lossless and chroma subsampling (jSquash/libavif).
 - JPEG XL: quality, effort, lossless and progressive encoding (jSquash/libjxl).
-- Cool-chic 5.0: CPU-only experimental **reduced Rust profile**, per-image model
-  training with quality/effort controls, self-contained `.cool` downloads, actual WASM
-  decoding and metrics. No Python, GPU, pretrained models or backend. This is **not**
-  the full reference encoder or its presets/performance; fine colour detail is limited,
-  and quality 100 is not lossless. See `crates/coolchic/README.md` for the exact profile.
+- Cool-chic 5.0: reference RGB intra MSE training and decoding in CPU WASM.
+  Four adjacent LOP/MOP/HOP/VHOP choices select the official architectures; sliders
+  expose actual rate constraint λ (increasing left-to-right) and training iterations.
+  Higher λ prioritizes smaller files; more iterations take longer. Tooltips focus on
+  practical trade-offs. Actual `.cool` downloads are decoded for the preview and metrics.
+  See `crates/coolchic/README.md` for algorithm/API and independent-reference validation.
 - Five tabs with one large content panel, retaining each codec's settings and result.
   No sidebar, popups, expandable settings or runs/history table.
 - Compact introduction at top left, image upload and square thumbnail at top right,
@@ -150,7 +151,7 @@ src/lib/runner.ts            one cancellable worker per experiment
 src/codec.worker.ts          orchestration; no UI-thread codec work
 crates/codec/src/lib.rs      Rust JPEG AI WASM adapter + metrics and unit tests
 crates/codec/src/bin/        native encoder+decoder model packer
-crates/coolchic/             self-contained CPU-only reduced Cool-chic 5.0 profile
+crates/coolchic/             reference Cool-chic v5 RGB MSE encoder/decoder in native Rust/WASM
 src/lib/coolchic.ts          lazy worker-side WASM adapter and training progress
 src/wasm-coolchic/           generated separate Cool-chic WASM module
 scripts/                    WASM/model preparation and source archive
@@ -190,11 +191,15 @@ against `dist/` using Vite preview. It does not certify JPEG AI conformance.
 - 8-bit sRGB still images only. Browser APIs import, resize and composite alpha on
   white **before** WASM; output transforms/entropy coding/metrics are WASM. Metadata
   is discarded. No HDR, animation, ICC preservation, or transparent output.
-- Cool-chic's first Rust profile is capped at 4 million pixels, each dimension below
-  16384. Larger inputs fail visibly: explicitly choose a smaller Downscale image size.
-  The `.cool` file contains its per-image network and latents. Only this restricted
-  profile is accepted by the Rust decoder; arbitrary reference files are unsupported.
-  Its simpler optimizer/architecture does not reproduce published 5.0 compression results.
+- Cool-chic is capped at 4 million pixels, each dimension below 16384. Larger inputs
+  fail visibly: explicitly choose a smaller Downscale image size. Conservative reference
+  training-buffer estimates reject jobs above 3 GiB and ask for confirmation above
+  1.5 GiB before allocating candidates. Its full standard intra MSE schedule requires at
+  least 2,000 iterations and can be slow. LOP/MOP/HOP/VHOP reference files, hyperlatents,
+  common-noise reconstruction and final interpolation are tested against the official
+  decoder. Scope is RGB 8-bit still-image MSE training, not video/YUV/high-bit-depth I/O
+  or perceptual Wasserstein training. Cross-runtime learned parameters/benchmark results
+  are not promised identical; exact file interoperability is independently checked.
 - Max input file 40 MiB and source/working image 40 MP (checked after browser decode).
   Codec/browser memory limits may reject a very large full-resolution job; the app does
   not silently resize it. Downscale selection is explicit.

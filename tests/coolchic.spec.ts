@@ -31,7 +31,7 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   await expect(pane.getByRole('radiogroup', { name: 'Compression preset' }).getByRole('radio')).toHaveCount(4);
   await expect(pane.getByRole('radio', { name: 'LOP', exact: true })).toBeChecked();
   await expect(pane.getByLabel('Training iterations', { exact: true })).toHaveAttribute('aria-valuetext', '2000 iterations');
-  await expect(pane.getByLabel('Quality', { exact: true })).toHaveAttribute('aria-valuetext', '40 out of 100');
+  await expect(pane.getByLabel('Rate constraint (λ)', { exact: true })).toHaveAttribute('aria-valuetext', '0.001');
   await expect(pane.getByRole('checkbox')).toHaveCount(0);
   await expect(pane.locator('.model-card')).toHaveCount(0);
   await upload(page);
@@ -92,13 +92,13 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   await page.getByRole('tab', { name: 'Cool-chic 5.0', exact: true }).click();
   await expect(pane.getByRole('button', { name: 'Download Cool-chic 5.0', exact: true })).toBeVisible();
   await pane.getByRole('radio', { name: 'MOP', exact: true }).check();
-  await pane.getByLabel('Quality', { exact: true }).fill('20');
+  await pane.getByLabel('Rate constraint (λ)', { exact: true }).fill('80');
   await pane.getByLabel('Training iterations', { exact: true }).fill('18');
   await expect(page.locator('[data-persistence]')).toContainText('Saved locally');
   await page.reload();
   await expect(pane).toHaveAttribute('data-phase', 'done');
   await expect(pane.getByRole('radio', { name: 'MOP', exact: true })).toBeChecked();
-  await expect(pane.getByLabel('Quality', { exact: true })).toHaveAttribute('aria-valuetext', '20 out of 100');
+  await expect(pane.getByLabel('Rate constraint (λ)', { exact: true })).toHaveAttribute('aria-valuetext', '0.01');
   await expect(pane.getByLabel('Training iterations', { exact: true })).toHaveAttribute('aria-valuetext', '4000 iterations');
   const restored = page.waitForEvent('download');
   await pane.getByRole('button', { name: 'Download Cool-chic 5.0', exact: true }).click();
@@ -178,13 +178,13 @@ test('Cool-chic segmented choices, intuitive sliders and practical tooltips are 
   await expect(page.getByRole('tooltip')).toContainText('memory');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('tooltip')).toHaveCount(0);
-  const quality = pane.getByRole('slider', { name: 'Quality', exact: true });
-  await quality.fill('0'); await expect(quality).toHaveAttribute('aria-valuetext', '0 out of 100');
-  await quality.fill('100'); await expect(quality).toHaveAttribute('aria-valuetext', '100 out of 100');
+  const rate = pane.getByRole('slider', { name: 'Rate constraint (λ)', exact: true });
+  await rate.fill('0'); await expect(rate).toHaveAttribute('aria-valuetext', '0.000001');
+  await rate.fill('100'); await expect(rate).toHaveAttribute('aria-valuetext', '0.1');
   const iterations = pane.getByRole('slider', { name: 'Training iterations', exact: true });
   await iterations.fill('100'); await expect(iterations).toHaveAttribute('aria-valuetext', '100000 iterations');
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const label of ['Quality', 'Training iterations']) {
+  for (const label of ['Rate constraint (λ)', 'Training iterations']) {
     await pane.getByRole('button', { name: `About ${label}`, exact: true }).click();
     await expect(page.getByRole('tooltip')).toBeInViewport();
     await page.keyboard.press('Escape');
@@ -197,6 +197,6 @@ test('Cool-chic controls and five-tab layout fit a narrow viewport', async ({ pa
   const pane = await open(page);
   await expect(pane.getByLabel('Training iterations', { exact: true })).toBeVisible();
   await expect(pane.getByRole('radiogroup', { name: 'Compression preset' })).toBeVisible();
-  await expect(pane.getByLabel('Quality', { exact: true })).toBeVisible();
+  await expect(pane.getByLabel('Rate constraint (λ)', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });

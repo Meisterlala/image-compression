@@ -5,12 +5,15 @@ third-party code and data. Open-source terms are not patent clearance.
 
 ## Runtime
 
-- Experimental reduced-profile Cool-chic 5.0 Rust port: format/decoder algorithms
-  and probability-table data adapted from Orange-OpenSource/Cool-Chic v5.0.0,
+- Cool-chic v5 RGB reference encoder/decoder port: neural, training, bitstream
+  algorithms and probability-table data adapted from Orange-OpenSource/Cool-Chic,
   commit a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6. Copyright 2023–2026 Orange,
   BSD-3-Clause (coolchic-LICENSE.txt). New port/application code is AGPL-3.0-only.
   Source: https://github.com/Orange-OpenSource/Cool-Chic/tree/a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6
-  This is not the full reference encoder and does not claim its compression results.
+- SOAP optimizer: Copyright 2024 Nikhil Vyas, MIT (soap-LICENSE.txt), with upstream
+  Orange modifications. Source: https://github.com/nikhilvyas/SOAP
+- nalgebra 0.34.2: Apache-2.0 (nalgebra-LICENSE.txt), portable matrix factorization.
+  Source: https://github.com/dimforge/nalgebra
 - constriction 0.4.2: MIT license selected (constriction-LICENSE.txt).
   Source: https://github.com/bamler-lab/constriction
 - probability 0.20.3: MIT (probability-LICENSE.txt).

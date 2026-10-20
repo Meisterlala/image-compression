@@ -14,13 +14,13 @@ function clamp(value: number, min: number, max: number, fallback: number) {
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 }
 
-// Move right for higher fidelity: smaller lambda places less weight on size.
+// Show the actual algorithm parameter, increasing numerically to the right.
 export function rateFromSlider(position: number): number {
-  return Number((10 ** (-1 - clamp(position, 0, 100, 40) / 20)).toPrecision(5));
+  return Number((10 ** (-6 + clamp(position, 0, 100, 60) / 20)).toPrecision(5));
 }
 export function rateToSlider(value: number): number {
   const lambda = clamp(value, coolchicRateMin, coolchicRateMax, 0.001);
-  return (-1 - Math.log10(lambda)) * 20;
+  return (Math.log10(lambda) + 6) * 20;
 }
 
 // Logarithmic spacing keeps 2k–10k useful while still reaching a 100k budget.

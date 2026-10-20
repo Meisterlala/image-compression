@@ -1,18 +1,30 @@
-# Official-reference golden fixtures
+# Official v5 reference fixtures
 
-Generated with `scripts/verify-coolchic.py --write-fixtures` using the official
-Cool-Chic **v5.0.0** source at `a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6`.
+Source: unmodified Orange Cool-Chic **v5.0.0**, commit
+`a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6`. The generators assert that revision
+and reject modified tracked source files. Synthetic test pixels only; no dataset.
 
-The Python script independently instantiates upstream modules, installs explicit
-quantized parameters (including nonzero spatial mean **and scale** ARM weights),
-and encodes deterministic synthetic latent grids using the official writer.
-`.rgba` contains the corresponding official decoder output, including opaque
-alpha. The Rust encoder is **not** used to generate either golden file.
+- `reference-operators.json`: actual PyTorch forward/backward results for
+  convolutions, synthesis, learned filters, quantizers, causal contexts, ARM/IFCE,
+  complete latent pyramids and 25-step SOAP trajectories (including zero/tiny
+  initial gradients).
+- `reference-graph.json`: actual `CoolChicEncoder.forward` and reference MSE loss,
+  including all network/latent gradients, hyperlatents, common randomness, final
+  interpolation and official LOP/MOP/HOP architectures.
+- `reference-training.json`: standard intra schedules, the reference neural-rate
+  estimator and final greedy quantization choices/parameters.
+- `full-reference/*.cool` and `.rgba`: seven files written and decoded by the
+  official Python codec, covering LOP/MOP/HOP/VHOP, common randomness,
+  hyperlatents, reduced-resolution synthesis and a linear/no-IFCE configuration.
+  Rust must reproduce exact RGBA and byte-identical header/network/range encoding.
 
-- 3×5 exercises narrow-image raster ordering, tiny and odd-size latent grids.
-- 13×17 exercises wavefront ordering and odd-size cropping at multiple scales.
-- Tests require neither Python nor model downloads; fixtures total <2 KiB.
+Generators live in `scripts/verify-coolchic-{operators,graph,training,streams}.py`.
+`--write-fixtures` is an explicit regeneration operation; default mode verifies
+committed data. The stream checker also trains actual Rust encoders for 2,000
+iterations and checks their output with the official decoder. Browser tests
+check official files directly in WASM and decode browser-trained downloads in an
+independent native process.
 
-The same script also checks the other direction: Rust encodes five sizes at
-three qualities, then the reference and Rust decoders must produce identical
-RGBA bytes. See the crate README for optional Python environment setup.
+Normal Cargo tests use only committed data, without Python or model downloads.
+Floating graph/gradient checks have explicit tolerances for CPU/libm rounding;
+integer entropy streams and the golden file reconstructions are checked exactly.

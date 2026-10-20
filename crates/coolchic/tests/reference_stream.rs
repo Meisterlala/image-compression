@@ -60,22 +60,6 @@ fn full_official_bitstreams_decode_and_reencode_exactly() {
 }
 
 #[test]
-fn old_reduced_profile_files_remain_decodable() {
-    for (bytes, rgba) in [
-        (
-            include_bytes!("fixtures/reference-3x5.cool").as_slice(),
-            include_bytes!("fixtures/reference-3x5.rgba").as_slice(),
-        ),
-        (
-            include_bytes!("fixtures/reference-13x17.cool").as_slice(),
-            include_bytes!("fixtures/reference-13x17.rgba").as_slice(),
-        ),
-    ] {
-        assert_eq!(codec::decode(bytes).unwrap().rgba, rgba);
-    }
-}
-
-#[test]
 fn truncated_extended_and_malformed_streams_are_rejected_without_panics() {
     for &(_, bytes, _) in CASES {
         for end in (0..bytes.len()).step_by(23) {
