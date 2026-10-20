@@ -64,7 +64,7 @@ export class TensorReplay {
           return new Proxy(pass, { get: (p, key) => {
             if (key === 'setPipeline') return (pipeline: GPUComputePipeline) => { steps.push(p => p.setPipeline(pipeline)); p.setPipeline(pipeline); };
             if (key === 'setBindGroup') return (index: number, group: GPUBindGroup, offsets?: number[]) => {
-              const copy = offsets ? Array.from(offsets) : undefined;
+              const copy = offsets ? Array.from(offsets) : [];
               steps.push(p => p.setBindGroup(index, group, copy)); p.setBindGroup(index, group, copy);
             };
             if (key === 'dispatchWorkgroups') return (x: number, y?: number, z?: number) => { steps.push(p => p.dispatchWorkgroups(x, y, z)); p.dispatchWorkgroups(x, y, z); };

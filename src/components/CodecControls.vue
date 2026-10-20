@@ -49,7 +49,7 @@ const gpuDecode = computed({
     <template v-else-if="settings.format === 'coolchic'">
       <div class="decode-setting">
         <label class="checkbox-row"><input v-model="coolchicGpu" type="checkbox"> GPU training</label>
-        <span>Adaptive WebGPU; CPU when faster</span>
+        <span>GPU training graph · CPU fallback</span>
       </div>
       <div class="field coolchic-point-field">
         <div class="control-heading">

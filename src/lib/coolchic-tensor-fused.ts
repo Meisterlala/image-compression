@@ -27,12 +27,17 @@ export function registerFusedCoolChicKernels() {
   for (const gradient of [false, true]) kernel(gradient ? 'CoolQuantGrad' : 'CoolQuant', (inputs, attrs, backend) => {
     const x = inputs.x!, mode = attrs.mode as number, temp = attrs.temperature as number, normalizer = attrs.normalizer as number;
     const t = float(mode === 1 || mode === 2 ? temp : 1), norm = float(mode === 1 || mode === 2 ? normalizer : 1);
-    const pair = `fn softPair(x: f32) -> vec2<f32> {
+    const pair = `fn roundEven(x: f32) -> f32 {
+      let low = floor(x); let fraction = x-low;
+      if (fraction < 0.5) { return low; } if (fraction > 0.5) { return low+1.0; }
+      return select(low,low+1.0,i32(low)%2 != 0);
+    }
+    fn softPair(x: f32) -> vec2<f32> {
       let f = floor(x); let v = tanh((x - f - 0.5) / ${t});
       return vec2<f32>(f + 0.5 * v / ${norm} + 0.5, 0.5 * (1.0 - v*v) / (${t} * ${norm}));
     }`;
     const expression = mode === 0 ? (gradient ? '16.0 * getDyByOutputIndex(index)' : 'getXByOutputIndex(index) * 16.0 + getNoiseByOutputIndex(index)')
-      : mode >= 3 ? (gradient ? '0.0' : 'round(getXByOutputIndex(index) * 16.0)')
+      : mode >= 3 ? (gradient ? '0.0' : 'roundEven(getXByOutputIndex(index) * 16.0)')
       : gradient ? (mode === 2 ? 'getDyByOutputIndex(index) * softPair(first.x + getNoiseByOutputIndex(index)).y * first.y * 16.0' : 'getDyByOutputIndex(index) * first.y * 16.0')
       : mode === 2 ? 'softPair(first.x + getNoiseByOutputIndex(index)).x' : 'first.x';
     const code = pair + body(`${mode === 1 || mode === 2 ? 'let first = softPair(getXByOutputIndex(index) * 16.0);' : ''} setOutputAtIndex(index, ${expression});`);

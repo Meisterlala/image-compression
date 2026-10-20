@@ -24,11 +24,18 @@ self.onmessage = async ({ data }) => {
     await init();
     if (data.type === 'loader') {
       if (data.unavailable) Object.defineProperty(navigator, 'gpu', { value: undefined });
-      const codec = await loadCoolChic({ ...defaultSettings, coolchicGpu: data.gpu, coolchicIterations: 100 }, () => {});
+      let trainingMs: number | undefined;
+      const codec = await loadCoolChic({ ...defaultSettings, coolchicPoint: data.point ?? 'lop', coolchicGpu: data.gpu, coolchicIterations: data.iterations ?? 100 }, (_text, info) => {
+        if (info?.stage === 'quantizing' && trainingMs === undefined) trainingMs = info.elapsedMs;
+      });
       const start = performance.now();
       const bytes = await codec.encode(new ImageData(new Uint8ClampedArray(rgba), w, h));
+      const ms = performance.now() - start, decoded = codec.decode(bytes.buffer);
+      let squaredError = 0;
+      for (let i = 0; i < rgba.length; i++) if (i % 4 !== 3) squaredError += (rgba[i] - decoded.data[i]) ** 2;
+      const psnr = 10 * Math.log10(255 ** 2 / (squaredError / (w * h * 3)));
       if (!(bytes.buffer instanceof ArrayBuffer)) throw new Error('Expected owned encoded bytes');
-      self.postMessage({ bytes, notices: codec.notices, ms: performance.now() - start }, [bytes.buffer]);
+      self.postMessage({ bytes, notices: codec.notices, ms, psnr, trainingMs }, [bytes.buffer]);
       return;
     }
     const runtime = await loadCoolChicRuntime(!!data.threads, typeof data.threads === 'number' ? data.threads : undefined);

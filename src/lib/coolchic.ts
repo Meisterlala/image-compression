@@ -1,9 +1,9 @@
 import type { EncodeProgress, Settings } from '../types';
-import { createCoolChicAcceleration, type Acceleration } from './coolchic-acceleration';
+import { createCoolChicGraphAcceleration, type GraphAcceleration } from './coolchic-graph-acceleration';
 import { loadCoolChicRuntime } from './coolchic-runtime';
 
 // Full reference MSE intra training and real bitstream decoding, in a dedicated
-// WASM module/worker, with optional WebGPU convolution acceleration.
+// WASM module/worker, with optional GPU-resident forward/backward execution.
 export async function loadCoolChic(settings: Settings, progress: (text: string, info?: EncodeProgress) => void) {
   const point = settings.coolchicPoint ?? 'lop';
   const iterations = settings.coolchicIterations ?? 2000;
@@ -22,17 +22,17 @@ export async function loadCoolChic(settings: Settings, progress: (text: string, 
     estimateMemory: (width: number, height: number) => portable.estimateCoolChicMemory(width, height, point),
     async encode(image: ImageData): Promise<Uint8Array<ArrayBuffer>> {
       const runtime = await loadCoolChicRuntime(image.width * image.height >= 16384);
-      const { CoolChicEncoder, setCoolChicAccelerator, coolChicCpuConvolution } = runtime.bindings;
+      const { CoolChicEncoder, setCoolChicGraphAccelerator } = runtime.bindings;
       if (runtime.warning) notices.push(runtime.warning);
       notices.push(`CPU training backend: WASM SIMD · ${runtime.threads} thread${runtime.threads === 1 ? '' : 's'}.`);
       let encoder: InstanceType<typeof CoolChicEncoder> | undefined;
-      let acceleration: Acceleration | undefined;
+      let acceleration: GraphAcceleration | undefined;
       try {
-        if (settings.coolchicGpu !== false) {
+        if (settings.coolchicGpu !== false && image.width * image.height >= 16384) {
           try {
             progress('Initializing Cool-chic WebGPU training…');
-            acceleration = await createCoolChicAcceleration((p, x, w, b, g) => coolChicCpuConvolution(p, x, w, b, g ?? undefined));
-            setCoolChicAccelerator(acceleration.convolution, 8_000_000);
+            acceleration = await createCoolChicGraphAcceleration();
+            setCoolChicGraphAccelerator(acceleration.gradient);
           } catch (error) {
             notices.push(`WebGPU training unavailable; using CPU WASM. ${error instanceof Error ? error.message : String(error)}`);
           }
@@ -61,15 +61,12 @@ export async function loadCoolChic(settings: Settings, progress: (text: string, 
         encoder = undefined; // finish consumes the Rust trainer, including on error.
         return new Uint8Array(trained.finish());
       } finally {
-        setCoolChicAccelerator(undefined, 0);
+        setCoolChicGraphAccelerator(undefined);
         encoder?.free();
         if (acceleration?.failure) notices.push(`WebGPU training fell back to CPU WASM: ${acceleration.failure}`);
-        if (acceleration) notices.push(acceleration.calls
-          ? `Training used WebGPU (${acceleration.calls} convolution jobs) + CPU WASM. Portable decoding stays on CPU.`
-          : acceleration.calibrations.length
-            ? `WebGPU tested ${acceleration.calibrations.length} convolution shapes; CPU was faster, so GPU offload was skipped.`
-            : 'WebGPU ready; operations below the offload threshold stayed on CPU WASM.');
+        if (acceleration?.calls) notices.push(`WebGPU tensor graph: ${acceleration.calls} complete forward/backward iterations. Reference SOAP, RD search and portable decoding use WASM.`);
         else if (settings.coolchicGpu === false) notices.push('WebGPU training disabled.');
+        else if (image.width * image.height < 16384) notices.push('Small image: CPU SIMD avoids GPU graph startup overhead.');
         acceleration?.dispose();
       }
     },
