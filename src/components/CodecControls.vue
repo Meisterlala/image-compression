@@ -68,11 +68,12 @@ const gpuDecode = computed({
       <div class="field">
         <div class="control-heading">
           <label :for="id('iterations')">Training iterations</label>
-          <MetricTooltip label="Training iterations" text="More iterations can improve quality or reduce file size, but encoding takes longer. Minimum: 2,000." />
+          <MetricTooltip label="Training iterations" text="More iterations can improve quality or reduce file size, but encoding takes longer." />
           <output :for="id('iterations')">{{ settings.coolchicIterations.toLocaleString('en-US') }}</output>
         </div>
-        <input :id="id('iterations')" v-model.number="coolchicIterations" type="range" min="0" max="100" step="1" aria-label="Training iterations" :aria-valuetext="`${settings.coolchicIterations} iterations`">
+        <input :id="id('iterations')" v-model.number="coolchicIterations" type="range" min="0" max="100" step="1" aria-label="Training iterations" :aria-valuetext="`${settings.coolchicIterations} iterations`" :aria-describedby="settings.coolchicIterations < 2000 ? id('iterations-warning') : undefined">
         <div class="range-captions"><span>Faster</span><span>More effort</span></div>
+        <p v-if="settings.coolchicIterations < 2000" :id="id('iterations-warning')" class="training-warning" role="note">Reference training requires at least 2,000 iterations. Shorter runs may produce larger files or less detail.</p>
       </div>
     </template>
     <template v-else>
@@ -249,6 +250,8 @@ input[type="range"] {
   margin: 8px 0;
   accent-color: var(--accent);
 }
+
+.training-warning { margin: 0; border-left: 2px solid var(--danger); padding-left: .5rem; font-size: .75rem; line-height: 1.5; color: var(--muted); }
 
 .range-captions {
   display: flex;
