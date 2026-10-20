@@ -248,8 +248,9 @@ def main():
     uniform = torch.tensor([0.0, 0.01, 0.25, 0.5, 0.75, 0.99, 1.0])
     cases["noise"] = [{"a": a, "uniform": flat(uniform),
         "output": flat(generate_kumaraswamy_noise(uniform, torch.tensor(a)))} for a in [1.0, 2.0, 5.0]]
-    for shape, group, max_dimension in [([3, 2], "network", 256), ([2, 3, 3, 3], "network", 256),
-            ([5], "network", 256), ([3, 2], "network", 2), ([1, 1, 3, 5], "latent", 0)]:
+    for shape, group, max_dimension, first_scale in [([3, 2], "network", 256, 1), ([2, 3, 3, 3], "network", 256, 1),
+            ([5], "network", 256, 1), ([3, 2], "network", 2, 1), ([1, 1, 3, 5], "latent", 0, 1),
+            ([2, 3, 3, 3], "network", 256, 0), ([3, 2], "network", 256, 1e-18)]:
         torch.manual_seed(873)
         initial = torch.randn(shape) * 0.2
         parameter = torch.nn.Parameter(initial.clone())
@@ -260,7 +261,7 @@ def main():
         optimizer = SOAP([parameter], **config)
         steps = []
         for index in range(25):
-            gradient = torch.randn(shape) * 0.1
+            gradient = torch.randn(shape) * 0.1 * (first_scale if index == 0 else 1)
             parameter.grad = gradient
             learning_rate = 0.01 if index < 12 else 0.002
             optimizer.param_groups[0]["lr"] = learning_rate

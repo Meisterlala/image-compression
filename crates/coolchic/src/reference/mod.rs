@@ -12,7 +12,9 @@ pub mod fixed;
 pub mod inter_feature;
 pub mod network;
 pub mod parameters;
+pub mod preset;
 pub mod pyramid;
+pub mod quantization;
 pub mod quantizer;
 pub mod random;
 pub mod rate;
@@ -20,6 +22,7 @@ pub mod resize;
 pub mod soap;
 pub mod stream;
 pub mod tensor;
+pub mod training;
 pub mod upsampling;
 
 pub use convolution::{Conv2d, ConvGradient, Synthesis, SynthesisGradient};

@@ -127,7 +127,7 @@ def main():
     elif metadata.read_text() != serialized:
         raise SystemExit("Reference manifest differs")
 
-    subprocess.run(["cargo", "build", "--quiet", "--release", "--manifest-path", str(ROOT / "crates/coolchic/Cargo.toml"), "--example", "reference"], check=True)
+    subprocess.run(["cargo", "build", "--quiet", "--release", "--manifest-path", str(ROOT / "crates/coolchic/Cargo.toml"), "--example", "reference", "--example", "reference_train"], check=True)
     native = ROOT / "crates/coolchic/target/release/examples/reference"
     with tempfile.TemporaryDirectory() as directory:
         directory = Path(directory)
@@ -140,6 +140,28 @@ def main():
             subprocess.run([str(native), "decode", str(written), str(written_decoded)], check=True)
             assert rgba(written) == written_decoded.read_bytes(), f"{case['name']}: Rust → reference pixels differ"
             print(f"PASS {case['name']}: reference → Rust and Rust-written → reference, exact RGBA")
+        trainer = ROOT / "crates/coolchic/target/release/examples/reference_train"
+        for width, height, point in [(8, 6, "lop"), (8, 6, "mop"), (4, 3, "hop"), (32, 24, "lop")]:
+            source = directory / "source.rgba"
+            original = bytes(v for y in range(height) for x in range(width) for v in
+                (x * 255 // max(width - 1, 1), y * 255 // max(height - 1, 1),
+                 (x + y) * 255 // max(width + height - 2, 1), 255))
+            source.write_bytes(original)
+            encoded, decoded = directory / "trained.cool", directory / "trained.rgba"
+            subprocess.run([str(trainer), str(source), str(width), str(height), "2000", "0.001", point, str(encoded)],
+                check=True, capture_output=True)
+            subprocess.run([str(native), "decode", str(encoded), str(decoded)], check=True)
+            official = rgba(encoded)
+            assert official == decoded.read_bytes(), f"Rust-trained {point} {width}x{height}: official decoder disagrees"
+            error = sum((a - b) ** 2 for i, (a, b) in enumerate(zip(original, official)) if i % 4 != 3) / (width * height * 3)
+            import math
+            psnr = 10 * math.log10(255**2 / error) if error else float("inf")
+            # On tiny images, the reference's neural-parameter RD penalty can
+            # legitimately dominate and discard detail. Use the larger sample
+            # for a reconstruction sanity bound, not tiny-file overhead cases.
+            if width * height >= 512:
+                assert psnr > 18, f"Rust-trained {point}: gradient reconstruction regressed ({psnr} dB)"
+            print(f"PASS Rust-trained {point} {width}×{height}: 2000 iterations, official decoder exact, {len(encoded.read_bytes())} bytes, {psnr:.2f} dB")
 
 
 if __name__ == "__main__":

@@ -27,12 +27,16 @@ Upstream v5's `ste` branch assigns its result inside `torch.no_grad`, detaching 
 
 - General reference v5 RGB bitstream headers and neural parameter serialization, Q16/Q32 integer ARM/IFCE, full causal range coding, and reconstruction. Seven official golden streams cover LOP/MOP/HOP/VHOP, common randomness, hyperlatents, reduced-resolution output and a linear/no-IFCE architecture. Native Rust re-encoding is byte-exact; both directions decode to exact official RGBA in the independent Python check. Old reduced-profile files remain decodable.
 
+- Complete standard intra MSE trainer: 5→2→1 warm-up candidates, reference iteration budgets (minimum 2000), validation-gated temperature/noise updates, cosine learning rates, global network-gradient clipping, best-checkpoint restoration, 500 hard-round refinement iterations and greedy ARM→IFCE→synthesis→upsampling RD quantization. Quantization choices and exp-Golomb orders match the unmodified reference in independent fixtures.
+- Actual Rust-trained LOP/MOP/HOP files independently decode to identical pixels in the official decoder, including a 32×24 gradient at 2000 iterations (390 bytes, 34.57 dB in the tested native build). This is a sanity sample, not a general benchmark or reference-quality guarantee.
+
+Training initialization/noise use a reproducible local RNG, not PyTorch's platform-specific CPU/GPU generator. Identical learned weights across implementations/devices are not promised. Bitstream-defined common randomness matches exactly. SOAP handles tiny/singular Gram matrices with positive scaling and a float64 decomposition fallback, retaining reference trajectory checks including zero/tiny first gradients.
+
 ## Remaining before replacing the app codec
 
-- Gradient clipping, warm-up candidate selection, schedules, validation/checkpoint selection and quantization search around the ported optimizer.
-- Reference architecture/configuration choices and parameter initialization; wire rate constraint and iteration controls to actual reference settings, not the old quality/pass shortcuts.
-- Extend interoperability checks to actual trained Rust outputs, not only independently configured reference network fixtures.
-- Browser WASM integration with cancellation/progress, memory limits and honest encode/decode benchmarks. No Python or server dependency at runtime.
+- Browser WASM integration, actual rate/iteration/architecture controls, persisted-setting defaults/migration, cancellation/progress, memory guardrails and honest encode/decode benchmarks. No Python or server dependency at runtime.
+- Replace/remove the old reduced encoder as the default path; retain backward decoding of its saved .cool outputs.
+- Update licenses, source packaging and user/developer documentation; run browser regression and reload/download integrity tests.
 
 ## Reproduce operator parity
 
@@ -43,6 +47,7 @@ git clone --depth 1 --branch v5.0.0 https://github.com/Orange-OpenSource/Cool-Ch
 .cache/coolchic-venv/bin/python scripts/verify-coolchic-operators.py --reference /tmp/coolchic-reference-v5
 .cache/coolchic-venv/bin/python scripts/verify-coolchic-graph.py --reference /tmp/coolchic-reference-v5
 .cache/coolchic-venv/bin/python scripts/verify-coolchic-streams.py --reference /tmp/coolchic-reference-v5
+.cache/coolchic-venv/bin/python scripts/verify-coolchic-training.py --reference /tmp/coolchic-reference-v5
 # Only after inspecting changes: add --write-fixtures to regenerate.
 cargo test --manifest-path crates/coolchic/Cargo.toml
 cargo clippy --manifest-path crates/coolchic/Cargo.toml --all-targets -- -D warnings
