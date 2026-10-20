@@ -45,6 +45,34 @@ async function initialize() {
   const backend = tf.backend() as WebGPUBackend;
   useQueueTensorUploads(backend);
   const device = backend.device;
+  let activeProgram = 'initialization', reportedApiFailure = false;
+  const runProgram = backend.runWebGPUProgram.bind(backend);
+  backend.runWebGPUProgram = (...args) => {
+    const program = args[0];
+    activeProgram = `${program.constructor.name} output=[${program.outputShape}] inputs=[${program.variableNames}]`;
+    return runProgram(...args);
+  };
+  const inspect = <T>(operation: string, detail: string, run: () => T): T => {
+    const program = activeProgram;
+    device.pushErrorScope('internal'); device.pushErrorScope('out-of-memory');
+    try { return run(); }
+    finally {
+      const oom = device.popErrorScope(), internal = device.popErrorScope();
+      void Promise.all([oom,internal]).then(errors => {
+        const error = errors.find(Boolean);
+        if (error && !reportedApiFailure) {
+          reportedApiFailure = true;
+          const message = `Cool-chic WebGPU first API failure: ${operation} (${detail}); ${program}; ${error.constructor.name}: ${error.message}`;
+          gpuFailure ??= message; console.error(message);
+        }
+      },() => {});
+    }
+  };
+  const createBuffer = device.createBuffer.bind(device), createModule = device.createShaderModule.bind(device), createPipeline = device.createComputePipeline.bind(device), submit = device.queue.submit.bind(device.queue);
+  device.createBuffer = descriptor => inspect('createBuffer',`${descriptor.size} bytes, usage=${descriptor.usage}, mapped=${!!descriptor.mappedAtCreation}`,() => createBuffer(descriptor));
+  device.createShaderModule = descriptor => inspect('createShaderModule',`${descriptor.label || 'unlabelled'}, ${descriptor.code.length} WGSL characters`,() => createModule(descriptor));
+  device.createComputePipeline = descriptor => inspect('createComputePipeline',descriptor.label || descriptor.compute.module.label || 'unlabelled',() => createPipeline(descriptor));
+  device.queue.submit = commands => inspect('queue.submit','command execution',() => submit(commands));
   device.addEventListener('uncapturederror', event => {
     // Keep the original failure, not a later "parent device is lost" symptom.
     gpuFailure ??= event.error.message;
@@ -52,7 +80,7 @@ async function initialize() {
   void device.lost.then(info => {
     const message = `Cool-chic WebGPU device lost (${info.reason}): ${info.message || 'No details provided by the browser'}`;
     gpuFailure ??= message;
-    console.error(`${message} [tensor memory: ${Math.round(backend.bufferManager.numBytesAllocated / 1024 ** 2)} MiB; live buffers: ${backend.bufferManager.getNumUsedBuffers()}]`);
+    console.error(`${message} [tensor memory: ${Math.round(backend.bufferManager.numBytesAllocated / 1024 ** 2)} MiB; live/cached buffers: ${backend.bufferManager.getNumUsedBuffers()}/${backend.bufferManager.getNumFreeBuffers()}; last program: ${activeProgram}]`);
   });
   // TFJS 4.22's AddN binds every operand at once, exceeding WebGPU's default
   // 8-storage-buffer limit for shared ARM gradients / >7 latent rates. Reduce
@@ -334,7 +362,13 @@ export class CoolChicTensorGraph {
     const key = JSON.stringify([evaluation, options.mode, options.temperature, options.normalizer, options.lambda]);
     const plan = this.plans.get(evaluation);
     if (!debug && plan?.key === key) return deviceOnly ? new Float32Array(0) : plan.graph.run(parameters, latents, noise);
-    if (!debug) { plan?.graph.dispose(); this.plans.delete(evaluation); }
+    if (!debug) {
+      // A completed training/evaluation plan must not retain its buffers and
+      // bind groups while the next graph is captured.
+      this.optimizer?.releasePlanBindings();
+      for (const cached of this.plans.values()) cached.graph.dispose();
+      this.plans.clear();
+    }
     tf.tidy(() => {
       const offsets = [0]; for (const n of this.spec.group_lengths) offsets.push(offsets[offsets.length - 1] + n);
       for (const p of this.refs) this.parameter(p).assign(tf.tensor1d(new Float32Array(parameters.subarray(offsets[p.group] + p.offset, offsets[p.group] + p.offset + p.length))));

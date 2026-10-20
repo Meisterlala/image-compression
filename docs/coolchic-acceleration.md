@@ -39,8 +39,8 @@ uniforms and host-written constants remain immutable. CPU tensors upload through
 `queue.writeBuffer`, without retaining mapped upload buffers in the replay. Later iterations update inputs and replay pipelines/bind
 groups without rebuilding the autodiff graph. Optimizer commands are cached too;
 noise and learning-rate data upload once per batch, and complete iterations share
-a command encoder until a SOAP basis refresh or batch boundary. Training and evaluation plans are
-cached separately so validation does not discard the training plan. Target/common tensors stay cached
+a command encoder until a SOAP basis refresh or batch boundary. Switching between training and evaluation releases the previous command plan
+and its optimizer bind groups, rather than retaining both GPU working sets. Target/common tensors stay cached
 until the graph descriptor changes. Gradient sums use bounded four-input groups
 to respect WebGPU storage-binding limits. Device validation errors are checked.
 

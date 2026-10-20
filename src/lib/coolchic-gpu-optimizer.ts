@@ -31,6 +31,9 @@ export class GpuSoap {
     this.scalars = allocate(3);
     this.staging = allocate(layout.size, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST);
   }
+  releasePlanBindings() {
+    this.recorded = undefined; this.groups.clear();
+  }
   get memoryBytes() {
     return this.state.size + this.clip.size + this.scalars.size + this.staging.size + this.scratch.reduce((n,buffer) => n+buffer.size,0);
   }
