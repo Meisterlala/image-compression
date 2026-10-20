@@ -26,8 +26,10 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   const requests: string[] = [];
   page.on('request', req => { requests.push(req.url()); expect(req.method()).toBe('GET'); });
   const pane = await open(page);
-  await expect(pane).toContainText('Experimental reduced Rust profile');
-  await expect(pane).toContainText('not the full reference encoder');
+  await expect(pane).toContainText('Experimental reduced encoder');
+  await expect(pane).toContainText('not the full Cool-chic reference encoder');
+  await expect(pane).toContainText('quality 100 is not lossless');
+  await expect(pane).not.toContainText('model is included');
   await expect(pane.getByRole('slider')).toHaveCount(2);
   await expect(pane.getByRole('checkbox')).toHaveCount(0);
   await expect(pane.locator('.model-card')).toHaveCount(0);
