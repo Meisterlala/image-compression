@@ -28,7 +28,7 @@ function resultRow(page: Page, format: string) {
 }
 
 async function settings(page: Page, format: string) {
-  const labels: Record<string, string> = { jpegai: 'JPEG AI', jpeg: 'JPEG', avif: 'AVIF', jxl: 'JPEG XL' };
+  const labels: Record<string, string> = { jpegai: 'JPEG AI', jpeg: 'JPEG', avif: 'AVIF', jxl: 'JPEG XL', coolchic: 'Cool-chic 5.0' };
   await page.getByRole('tab', { name: labels[format], exact: true }).click();
 }
 
@@ -41,17 +41,17 @@ async function run(page: Page, format: string) {
   await expect(resultRow(page, format).locator('[data-metric="encode"]')).toHaveAttribute('data-ms', /[0-9]/);
 }
 
-test('codec tabs retain four real WASM outputs with one visible panel', async ({ page }) => {
+test('codec tabs retain five real WASM outputs with one visible panel', async ({ page }) => {
   const requests: string[] = [];
   page.on('request', request => { expect(request.method()).toBe('GET'); requests.push(request.url()); });
   await page.goto('/');
-  await expect(page.getByRole('tab')).toHaveCount(4);
+  await expect(page.getByRole('tab')).toHaveCount(5);
   await expect(page.getByRole('tabpanel')).toHaveCount(1);
   await expect(page.locator('.codec-pane:visible')).toHaveCount(1);
   await expect(page.locator('aside, dialog')).toHaveCount(0);
   await expect(page.getByRole('table', { name: 'Image format comparison', exact: true })).toBeVisible();
-  await expect(page.locator('tbody tr')).toHaveCount(5);
-  for (const format of ['jpegai', 'jpeg', 'avif', 'jxl']) {
+  await expect(page.locator('tbody tr')).toHaveCount(6);
+  for (const format of ['jpegai', 'jpeg', 'avif', 'jxl', 'coolchic']) {
     await expect(resultRow(page, format).locator('td')).toHaveText(Array(6).fill(''));
   }
   await expect(page.locator('.page-header a')).toHaveCount(0);
@@ -61,7 +61,7 @@ test('codec tabs retain four real WASM outputs with one visible panel', async ({
   await expect(page.getByLabel('Original image', { exact: true })).toBeVisible();
   await expect(page.locator('.comparison canvas')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Encode all|comparison JSON/i })).toHaveCount(0);
-  for (const [id, label] of [['jpegai', 'JPEG AI'], ['jpeg', 'JPEG'], ['avif', 'AVIF'], ['jxl', 'JPEG XL']]) {
+  for (const [id, label] of [['jpegai', 'JPEG AI'], ['jpeg', 'JPEG'], ['avif', 'AVIF'], ['jxl', 'JPEG XL'], ['coolchic', 'Cool-chic 5.0']]) {
     await run(page, id!);
     const panel = pane(page, id!);
     await expect(panel).toHaveAttribute('data-phase', 'done', { timeout: 150_000 });
@@ -69,7 +69,7 @@ test('codec tabs retain four real WASM outputs with one visible panel', async ({
     const event = page.waitForEvent('download');
     await panel.getByRole('button', { name: `Download ${label}`, exact: true }).click();
     const download = await event;
-    expect(download.suggestedFilename()).toMatch(/\.(jai|jpg|avif|jxl)$/);
+    expect(download.suggestedFilename()).toMatch(/\.(jai|jpg|avif|jxl|cool)$/);
     const stream = await download.createReadStream();
     const chunks: Buffer[] = []; for await (const chunk of stream!) chunks.push(chunk);
     const encoded = Buffer.concat(chunks);
@@ -109,7 +109,7 @@ test('codec tabs retain four real WASM outputs with one visible panel', async ({
   }
   await expect(resultRow(page, 'original').locator('[data-rank]')).toHaveCount(0);
   await expect(page.locator('.comparison:visible')).toHaveCount(1);
-  await expect(page.locator('[role="tabpanel"]')).toHaveCount(4);
+  await expect(page.locator('[role="tabpanel"]')).toHaveCount(5);
   await settings(page, 'jpegai');
   await expect(page.getByLabel('Right JPEG AI image', { exact: true })).toBeVisible();
   expect(requests.every(url => new URL(url).hostname === 'localhost' || url.startsWith('blob:'))).toBeTruthy();
@@ -411,7 +411,7 @@ test('file-size percentage reports larger output honestly', async ({ page }) => 
 test('every comparison metric has a tooltip and improvement direction', async ({ page }) => {
   await page.goto('/');
   const table = page.getByRole('table', { name: 'Image format comparison', exact: true });
-  await expect(table.locator('tbody tr')).toHaveCount(5);
+  await expect(table.locator('tbody tr')).toHaveCount(6);
   const headings = table.locator('thead th button');
   await expect(headings).toHaveCount(6);
   await expect(table.locator('.direction')).toHaveCount(0);

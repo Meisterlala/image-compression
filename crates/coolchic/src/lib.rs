@@ -5,6 +5,8 @@ mod entropy;
 mod model;
 mod stream;
 mod train;
+#[cfg(feature = "wasm")]
+mod wasm;
 pub use train::Encoder;
 
 /// Deliberately bounded first browser profile, independent of other codec limits.

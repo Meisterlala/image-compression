@@ -5,6 +5,16 @@ third-party code and data. Open-source terms are not patent clearance.
 
 ## Runtime
 
+- Experimental reduced-profile Cool-chic 5.0 Rust port: format/decoder algorithms
+  and probability-table data adapted from Orange-OpenSource/Cool-Chic v5.0.0,
+  commit a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6. Copyright 2023–2026 Orange,
+  BSD-3-Clause (coolchic-LICENSE.txt). New port/application code is AGPL-3.0-only.
+  Source: https://github.com/Orange-OpenSource/Cool-Chic/tree/a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6
+  This is not the full reference encoder and does not claim its compression results.
+- constriction 0.4.2: MIT license selected (constriction-LICENSE.txt).
+  Source: https://github.com/bamler-lab/constriction
+- probability 0.20.3: MIT (probability-LICENSE.txt).
+  Source: https://github.com/stainless-steel/probability
 - zenjpegai, pinned to 1192fca6b6c2fdc4dcf29a6c8064c53a987caf59:
   AGPL-3.0-only or commercial. This build uses AGPL-3.0-only.
   Source: https://github.com/imazen/zenjpegai/tree/1192fca6b6c2fdc4dcf29a6c8064c53a987caf59
@@ -29,7 +39,8 @@ third-party code and data. Open-source terms are not patent clearance.
 
 ## Rust transitive dependencies
 
-Exact versions and checksums are in crates/codec/Cargo.lock in the source archive.
+Exact versions and checksums are in crates/codec/Cargo.lock and
+crates/coolchic/Cargo.lock in the source archive.
 Their complete sources and license files are available through Cargo (`cargo vendor`).
 These include archmage, magetypes, safe_unaligned_simd, libm, enough, whereat,
 wasm-bindgen, js-sys, serde and serde-wasm-bindgen and their transitive dependencies.

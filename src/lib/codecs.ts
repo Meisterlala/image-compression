@@ -2,7 +2,11 @@ import type { Format, Settings } from '../types';
 
 // Explicit single-threaded factories avoid nested Emscripten workers and work without
 // SharedArrayBuffer/cross-origin isolation. All transforms still execute in WASM.
-export async function loadCodec(format: Exclude<Format, 'jpegai'>, s: Settings) {
+export async function loadCodec(format: Exclude<Format, 'jpegai'>, s: Settings, progress: (text: string) => void = () => {}) {
+  if (format === 'coolchic') {
+    const { loadCoolChic } = await import('./coolchic');
+    return loadCoolChic(s.quality, s.effort, progress);
+  }
   if (format === 'jpeg') {
     const [{ default: factory }, { defaultOptions }, { default: decode, init: initDecoder }] = await Promise.all([
       import('@jsquash/jpeg/codec/enc/mozjpeg_enc.js'), import('@jsquash/jpeg/meta.js'), import('@jsquash/jpeg/decode.js'),

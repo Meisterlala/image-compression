@@ -39,6 +39,17 @@ const id = (field: string) => `${settings.value.format}-${field}`;
         <input :id="id('target-bpp')" v-model.number="settings.targetBpp" type="range" min="0.1" max="2" step="0.05">
       </div>
     </template>
+    <template v-else-if="settings.format === 'coolchic'">
+      <p class="hint full-width">Experimental reduced Rust profile, not the full reference encoder or its presets. Trains a small model per image on your CPU; the model is included in the .cool file. No model downloads or GPU. Fine colour detail is limited, even at quality 100. Maximum 4 million pixels.</p>
+      <div class="field">
+        <label :for="id('quality')">Quality <output>{{ settings.quality }}</output></label>
+        <input :id="id('quality')" v-model.number="settings.quality" type="range" min="1" max="100">
+      </div>
+      <div class="field">
+        <label :for="id('effort')">Training effort <output>{{ settings.effort }} · {{ 2 + settings.effort * 2 }} passes</output></label>
+        <input :id="id('effort')" v-model.number="settings.effort" type="range" min="1" max="9">
+      </div>
+    </template>
     <template v-else>
       <div class="field">
         <label :for="id('quality')">Quality <output>{{ settings.quality }}</output></label>

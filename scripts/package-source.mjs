@@ -19,7 +19,9 @@ for (const [op, file] of [['bop', 'manifest.json'], ['hop', 'manifest-hop.json']
 const args = [
   '-czf', 'public/source.tar.gz',
   '--exclude=crates/codec/target',
+  '--exclude=crates/coolchic/target',
   '--exclude=src/wasm',
+  '--exclude=src/wasm-coolchic',
   'src', 'crates', 'scripts', 'tests', 'deploy', 'public/legal',
   'public/models/manifest.json', 'public/models/manifest-hop.json', 'index.html', 'package.json', 'package-lock.json',
   'tsconfig.json', 'vite.config.ts', 'playwright.config.ts',

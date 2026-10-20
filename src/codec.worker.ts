@@ -64,7 +64,8 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
       ai.free();
     } else {
       progress(`Loading ${s.format.toUpperCase()} encoder and decoder…`);
-      const codec = await loadCodec(s.format, s);
+      const codec = await loadCodec(s.format, s, progress);
+      if (s.format === 'coolchic') notices.push('Experimental reduced Cool-chic 5.0 profile: not the full reference encoder. CPU-trained per-image model is included in the bitstream; no external weights. Fine colour detail and compression performance differ from the reference presets.');
       startupMs = performance.now() - start;
       progress(`Encoding ${s.format.toUpperCase()} locally…`);
       let tick = performance.now();

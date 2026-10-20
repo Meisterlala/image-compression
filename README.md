@@ -24,7 +24,7 @@ checkpoints at build time (~430 MiB), validates their LFS SHA-256 hashes, and pa
 bundles total ~322 MiB (four BOP at ~26 MiB each, four HOP at ~54 MiB each). Raw checkpoints remain in `.cache/`; model bundles and
 WASM are generated, not committed. The manifests and dependency lockfiles are committed.
 
-`npm run models` is required for JPEG AI, not JPEG/AVIF/JPEG XL. Missing assets
+`npm run models` is required for JPEG AI, not JPEG/AVIF/JPEG XL/Cool-chic. Missing assets
 produce a visible error rather than simulated compression. `npm run build` refuses
 to publish an incomplete model set.
 
@@ -79,7 +79,12 @@ modifying or redistributing it. External library and model terms also apply.
 - JPEG: quality, progressive mode and chroma subsampling (MozJPEG).
 - AVIF: quality, effort, lossless and chroma subsampling (jSquash/libavif).
 - JPEG XL: quality, effort, lossless and progressive encoding (jSquash/libjxl).
-- Four tabs with one large content panel, retaining each codec's settings and result.
+- Cool-chic 5.0: CPU-only experimental **reduced Rust profile**, per-image model
+  training with quality/effort controls, self-contained `.cool` downloads, actual WASM
+  decoding and metrics. No Python, GPU, pretrained models or backend. This is **not**
+  the full reference encoder or its presets/performance; fine colour detail is limited,
+  and quality 100 is not lossless. See `crates/coolchic/README.md` for the exact profile.
+- Five tabs with one large content panel, retaining each codec's settings and result.
   No sidebar, popups, expandable settings or runs/history table.
 - Compact introduction at top left, image upload and square thumbnail at top right,
   with the Downscale image choices directly beneath them.
@@ -123,7 +128,7 @@ src/App.vue                  header upload, codec tabs and retained panels
 src/components/CodecPane.vue independent settings, memory confirmation and downloads per format
 src/components/ImageComparison.vue shared independent left/right image selectors
 src/components/ComparisonViewer.vue two-image split, zoom and pan renderer
-src/components/ComparisonTable.vue shared original/four-codec metrics table
+src/components/ComparisonTable.vue shared original/five-codec metrics table
 src/components/MetricTooltip.vue accessible viewport-clamped metric descriptions
 src/components/              input, controls, viewer, measurements, inline model weights
 src/lib/comparisons.ts       serial job queue and independent per-codec state/cancellation
@@ -134,6 +139,9 @@ src/lib/runner.ts            one cancellable worker per experiment
 src/codec.worker.ts          orchestration; no UI-thread codec work
 crates/codec/src/lib.rs      Rust JPEG AI WASM adapter + metrics and unit tests
 crates/codec/src/bin/        native encoder+decoder model packer
+crates/coolchic/             self-contained CPU-only reduced Cool-chic 5.0 profile
+src/lib/coolchic.ts          lazy worker-side WASM adapter and training progress
+src/wasm-coolchic/           generated separate Cool-chic WASM module
 scripts/                    WASM/model preparation and source archive
 public/models/manifest*.json pinned BOP/HOP weights and integrity metadata
 ```
@@ -158,7 +166,7 @@ cargo clippy --manifest-path crates/codec/Cargo.toml --all-targets --features mo
 
 If using an already installed Chromium, set
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chromium`.
-The browser suite covers four-codec roundtrips, downloaded bitstreams and ratio
+The browser suite covers five-codec roundtrips, downloaded bitstreams and ratio
 measurements, lossless equality, JPEG AI target search, cache-only model reuse,
 card selection/removal, shared-table values/empty rows, metric tooltips, memory confirmation
 before model loading, tab/zoom state retention, action sizing, independent settings/results,
@@ -171,6 +179,11 @@ against `dist/` using Vite preview. It does not certify JPEG AI conformance.
 - 8-bit sRGB still images only. Browser APIs import, resize and composite alpha on
   white **before** WASM; output transforms/entropy coding/metrics are WASM. Metadata
   is discarded. No HDR, animation, ICC preservation, or transparent output.
+- Cool-chic's first Rust profile is capped at 4 million pixels, each dimension below
+  16384. Larger inputs fail visibly: explicitly choose a smaller Downscale image size.
+  The `.cool` file contains its per-image network and latents. Only this restricted
+  profile is accepted by the Rust decoder; arbitrary reference files are unsupported.
+  Its simpler optimizer/architecture does not reproduce published 5.0 compression results.
 - Max input file 40 MiB and source/working image 40 MP (checked after browser decode).
   Codec/browser memory limits may reject a very large full-resolution job; the app does
   not silently resize it. Downscale selection is explicit.

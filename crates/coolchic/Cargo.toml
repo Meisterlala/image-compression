@@ -5,7 +5,14 @@ edition = "2024"
 license = "AGPL-3.0-only"
 description = "CPU-only experimental Cool-chic 5.0 image profile"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+wasm = ["dep:wasm-bindgen"]
+
 [dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
 constriction = "=0.4.2"
 probability = "0.20"
 
