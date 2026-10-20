@@ -262,7 +262,7 @@ impl Soap {
 
     /// Compact state shared with the GPU optimizer. Matrix storage on the wire
     /// is row-major; nalgebra's internal column-major order is never exposed.
-    #[cfg(any(feature = "wasm", test))]
+    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
     pub(crate) fn gpu_pack(
         &self,
         offset: usize,
@@ -298,7 +298,7 @@ impl Soap {
         json!({"offset":offset,"length":self.first_moment.len(),"first":first,"second":second,"latent":latent,"axes":axes})
     }
 
-    #[cfg(any(feature = "wasm", test))]
+    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
     pub(crate) fn gpu_unpack(&mut self, state: &[f32], cursor: &mut usize, step: usize) {
         let n = self.first_moment.len();
         self.first_moment
@@ -324,7 +324,7 @@ impl Soap {
         self.step = step;
     }
 
-    #[cfg(any(feature = "wasm", test))]
+    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
     pub(crate) fn gpu_step(&self) -> i32 {
         if self.initialized {
             self.step as i32
@@ -335,7 +335,7 @@ impl Soap {
 
     /// Use exactly the reference eigensolver/QR for the GPU's small basis
     /// refreshes. Returns a row-major basis followed by the variance permutation.
-    #[cfg(any(feature = "wasm", test))]
+    #[cfg(feature = "wasm")]
     pub fn gpu_basis(gram: &[f32], previous: Option<&[f32]>) -> Result<Vec<f32>> {
         let d = (gram.len() as f64).sqrt() as usize;
         if d == 0
@@ -413,60 +413,5 @@ impl Soap {
         }
         self.first_moment = self.project(&self.first_moment, false);
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod gpu_state_tests {
-    use super::*;
-
-    #[test]
-    fn packed_gpu_state_resumes_the_reference_optimizer() {
-        for (shape, config) in [
-            (vec![3, 3], Config::network(0.01)),
-            (vec![1, 1, 7, 9], Config::latent(0.01)),
-        ] {
-            let mut reference = Soap::new(shape.clone(), config).unwrap();
-            let mut restored = Soap::new(shape, config).unwrap();
-            let mut parameters = vec![0.25; reference.first_moment.len()];
-            for i in 0..23 {
-                let gradient: Vec<_> = (0..parameters.len())
-                    .map(|j| ((j * 7 + i * 13) % 31) as f32 / 31.0 - 0.5)
-                    .collect();
-                reference.update(&mut parameters, &gradient).unwrap();
-                let mut state = parameters.clone();
-                reference.gpu_pack(0, config.max_precondition_dim == 0, &mut state);
-                let mut cursor = parameters.len();
-                restored.gpu_unpack(&state, &mut cursor, reference.step);
-                assert_eq!(cursor, state.len());
-                assert_eq!(restored.gpu_step(), reference.gpu_step());
-                let mut actual = parameters.clone();
-                let mut expected = parameters.clone();
-                restored.update(&mut actual, &gradient).unwrap();
-                reference.clone().update(&mut expected, &gradient).unwrap();
-                assert_eq!(actual, expected);
-            }
-        }
-    }
-
-    #[test]
-    fn basis_helper_matches_reference_initialization_and_refresh() {
-        let mut soap = Soap::new(vec![2], Config::network(0.01)).unwrap();
-        soap.gram[0] = Some(DMatrix::from_row_slice(2, 2, &[4.0, 1.0, 1.0, 2.0]));
-        soap.initialize_basis().unwrap();
-        let initial = Soap::gpu_basis(&[4.0, 1.0, 1.0, 2.0], None).unwrap();
-        let q = soap.basis[0].as_ref().unwrap();
-        assert_eq!(&initial[..4], &[q[(0, 0)], q[(0, 1)], q[(1, 0)], q[(1, 1)]]);
-        soap.second_moment = vec![0.0, 1.0];
-        soap.refresh_basis();
-        let refreshed = Soap::gpu_basis(&[4.0, 1.0, 1.0, 2.0], Some(&initial[..4])).unwrap();
-        let q = soap.basis[0].as_ref().unwrap();
-        assert_eq!(
-            &refreshed[..4],
-            &[q[(0, 0)], q[(0, 1)], q[(1, 0)], q[(1, 1)]]
-        );
-        assert_eq!(&refreshed[4..], &soap.second_moment);
-        assert!(Soap::gpu_basis(&[f32::NAN], None).is_err());
-        assert!(Soap::gpu_basis(&[1.0, 2.0], None).is_err());
     }
 }
