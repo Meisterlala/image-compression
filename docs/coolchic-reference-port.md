@@ -29,8 +29,12 @@ underflow with zero/tiny-gradient covariances while retaining trajectory checks.
 
 Four adjacent preset choices select the actual reference architectures. The rate
 slider shows actual λ, increasing left-to-right from 1e-6 to 0.1; higher values
-prioritize smaller files. The training slider covers 2,000–100,000 iterations.
-No quality percentage or approximation is substituted for the algorithm inputs.
+prioritize smaller files. Training budgets range from 100 to 100,000 iterations.
+Below 2,000, a visible warning explains the reference minimum;
+training stages and validation cadence are proportionally shortened. The reference
+schedule remains unchanged at 2,000 and above. The dedicated worker posts progress
+without artificial timer pauses and throttles UI updates to avoid excess rendering.
+No quality percentage is substituted for the algorithm inputs.
 Tooltips describe practical trade-offs; detailed scheduling stays in source/docs.
 
 Per-image training is measured as encoding time. WASM startup, actual byte-stream

@@ -31,7 +31,7 @@ describe('Cool-chic nonlinear sliders', () => {
     expect(rateFromSlider(-100)).toBe(0.000001);
     expect(rateFromSlider(200)).toBe(0.1);
     expect(rateToSlider(Number.NaN)).toBe(60);
-    expect(iterationsToSlider(Number.NaN)).toBe(0);
+    expect(iterationsToSlider(Number.NaN)).toBe(25);
     expect(iterationsFromSlider(200)).toBe(100000);
   });
 });

@@ -25,8 +25,10 @@ independent development-time parity checks.
   these bytes, not copied from the training graph or input image.
 
 The browser exposes the actual architecture, rate constraint λ and training
-iteration budget. Standard intra training requires at least 2,000 iterations.
-The default browser budget is 2,000; the reference CLI's default is 10,000.
+iteration budget. The browser allows 100–100,000 iterations. Below the reference
+minimum of 2,000, it warns and proportionally
+shortens training stages and validation cadence. At 2,000 and above the reference
+schedule is unchanged. The browser defaults to 2,000; the reference CLI to 10,000.
 Larger λ favors smaller files; smaller λ favors detail. This codec is lossy.
 
 Training initialization and noise use a deterministic local RNG, not PyTorch's
