@@ -55,6 +55,27 @@ cargo build --manifest-path crates/coolchic/Cargo.toml --target wasm32-unknown-u
 ```
 
 `examples/rgba.rs` provides dependency-free native file I/O for raw RGBA buffers.
+The encoder expects already-composited 8-bit sRGB; alpha is ignored (the app
+composites on white before calling WASM).
+
+Golden fixtures generated independently by the official Python writer/decoder
+are checked by normal Cargo tests, including spatial mean/scale contexts,
+raster/wavefront ordering, odd dimensions and cropping. No Python is needed for
+these tests. To additionally test **both directions** against the actual reference:
+
+```sh
+# Optional developer-only environment, not an app/runtime dependency:
+git clone --branch v5.0.0 --depth 1 https://github.com/Orange-OpenSource/Cool-Chic.git .cache/coolchic-reference
+uv venv --python 3.12 .cache/coolchic-venv
+uv pip install --python .cache/coolchic-venv/bin/python torch torchvision --index-url https://download.pytorch.org/whl/cpu
+uv pip install --python .cache/coolchic-venv/bin/python numpy einops fvcore ConfigArgParse scipy constriction==0.4.2 matplotlib
+.cache/coolchic-venv/bin/python scripts/verify-coolchic.py --reference .cache/coolchic-reference
+```
+
+The script refuses a different upstream commit, verifies exact RGBA agreement
+for five sizes at three Rust quality settings, and independently constructs
+reference-produced files to decode with Rust. `--write-fixtures` regenerates the
+two committed golden cases. Test fixtures contain synthetic pixels, not a dataset.
 
 ## Provenance
 

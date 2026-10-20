@@ -105,7 +105,7 @@ async function loadFile(chosen: File, resizing = false) {
     <header id="original-image" class="page-header" tabindex="-1">
       <div class="intro">
         <h1>Image compression</h1>
-        <p>Compare JPEG AI, JPEG, AVIF and JPEG XL on your own image. Adjust compression and compare image quality, file size, and encoding and decoding times.</p>
+        <p>Compare JPEG AI, JPEG, AVIF, JPEG XL and experimental Cool-chic on your own image. Adjust compression and compare image quality, file size, and encoding and decoding times.</p>
       </div>
       <ImageInput
         v-model:size="downscaleSize"
