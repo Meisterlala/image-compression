@@ -49,7 +49,7 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
         @busy="modelBusy = $event"
         @ready="modelsReady = $event"
       />
-      <CodecControls v-model="settings" :disabled="working || importing" />
+      <CodecControls v-model="settings" :disabled="working || importing" :gpu-failed="status.gpuFailed" />
     </section>
     <p v-if="status.error" class="error" role="alert">{{ status.error }}</p>
     <p v-if="changed" class="changed-note">Settings or image size changed. Showing the previous result; encode again to update it.</p>

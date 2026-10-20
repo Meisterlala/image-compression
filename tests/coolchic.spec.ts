@@ -48,7 +48,7 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   await expect(pane.getByRole('radio', { name: 'LOP', exact: true })).toBeChecked();
   await expect(pane.getByLabel('Training iterations', { exact: true })).toHaveAttribute('aria-valuetext', '2000 iterations');
   await expect(pane.getByLabel('Rate constraint (λ)', { exact: true })).toHaveAttribute('aria-valuetext', '0.001');
-  await expect(pane.getByRole('checkbox', { name: 'GPU training', exact: true })).toBeChecked();
+  await expect(pane.getByRole('checkbox', { name: 'GPU acceleration', exact: true })).toBeChecked();
   await expect(pane.locator('.model-card')).toHaveCount(0);
   await upload(page);
   await pane.getByRole('button', { name: 'Encode', exact: true }).click();
@@ -129,7 +129,7 @@ test('Cool-chic GPU toggle persists and automatic threaded WASM trains a portabl
   const requests: string[] = [];
   page.on('request', request => requests.push(request.url()));
   const pane = await open(page);
-  const gpu = pane.getByRole('checkbox', { name: 'GPU training', exact: true });
+  const gpu = pane.getByRole('checkbox', { name: 'GPU acceleration', exact: true });
   await expect(gpu).toBeChecked();
   await expect(pane.getByRole('checkbox', { name: /SIMD|multithreading/i })).toHaveCount(0);
   await gpu.uncheck();

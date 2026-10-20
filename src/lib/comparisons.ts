@@ -3,7 +3,7 @@ import { defaultSettings, formats, type EncodeProgress, type Format, type Result
 import { startJob } from './runner';
 
 export type Phase = 'idle' | 'queued' | 'running' | 'confirming' | 'done' | 'cancelled' | 'error';
-export interface PaneStatus { progress?: EncodeProgress; phase: Phase; message: string; error: string; confirmationBytes: number | null }
+export interface PaneStatus { gpuFailed?: boolean; progress?: EncodeProgress; phase: Phase; message: string; error: string; confirmationBytes: number | null }
 
 export function useComparisons(source: ShallowRef<ImageData | undefined>, referenceBytes: Ref<number>, downscaled: Ref<boolean>) {
   const settings = reactive(Object.fromEntries(formats.map(format => [
@@ -39,6 +39,7 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>, refere
               state.phase = 'confirming';
               state.message = '';
             },
+            () => { state.gpuFailed = true; },
           );
           const current = { format: next.format, job, cancelled: false };
           active = current;
@@ -66,6 +67,7 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>, refere
     const state = status[format];
     if (!source.value || state.phase === 'queued' || state.phase === 'running' || state.phase === 'confirming') return;
     state.progress = undefined;
+    state.gpuFailed = false;
     state.phase = 'queued';
     state.error = '';
     state.message = 'Queued. Waiting for the current codec.';
@@ -99,7 +101,7 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>, refere
   function reset() {
     for (const { id } of formats) {
       delete results[id];
-      Object.assign(status[id], { phase: 'idle', message: '', error: '', confirmationBytes: null, progress: undefined });
+      Object.assign(status[id], { phase: 'idle', message: '', error: '', confirmationBytes: null, progress: undefined, gpuFailed: false });
     }
   }
 

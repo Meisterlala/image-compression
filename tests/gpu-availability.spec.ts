@@ -14,7 +14,7 @@ for (const mode of ['missing', 'no-adapter', 'device-failure', 'available'] as c
     }, mode);
     await page.emulateMedia({ colorScheme: 'light' });
     await page.goto('/');
-    for (const [tab, label] of [['JPEG AI', 'GPU decoding'], ['Cool-chic 5.0', 'GPU training']]) {
+    for (const [tab, label] of [['JPEG AI', 'GPU decoding'], ['Cool-chic 5.0', 'GPU acceleration']]) {
       await page.getByRole('tab', { name: tab, exact: true }).click();
       const toggle = page.getByRole('checkbox', { name: label, exact: true });
       if (mode === 'available') {

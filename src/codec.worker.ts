@@ -7,6 +7,7 @@ import { getCachedModel, loadManifest } from './lib/models';
 import { JPEG_AI_CONFIRM_THRESHOLD, JPEG_AI_MEMORY_LIMIT, MAX_PIXELS } from './lib/limits';
 
 const progress = (text: string, info?: EncodeProgress) => self.postMessage({ type: 'progress', text, progress: info } satisfies WorkerMessage);
+const gpuFailure = () => self.postMessage({ type: 'gpu-failure' } satisfies WorkerMessage);
 let resume: (() => void) | undefined;
 self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
   if ('type' in data) {
@@ -70,13 +71,14 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
       decoded = new Uint8ClampedArray(reconstruction.pixels);
       decodeBackend = reconstruction.backend;
       decodeWarning = reconstruction.warning;
+      if (decodeWarning) gpuFailure();
       decodeMs = performance.now() - tick;
       } finally {
         ai.free();
       }
     } else {
       progress(`Loading ${s.format.toUpperCase()} encoder and decoder…`);
-      const codec = await loadCodec(s.format, s, progress);
+      const codec = await loadCodec(s.format, s, progress, gpuFailure);
       if ('estimateMemory' in codec) {
         estimatedMemory = codec.estimateMemory(width, height);
         if (estimatedMemory > 3 * 1024 ** 3) throw new Error('Cool-chic reference training exceeds the 3 GiB browser memory budget. Choose a smaller Downscale image size or a lighter operating point.');

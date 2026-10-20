@@ -1,5 +1,5 @@
 import type { EncodeProgress, Job, Result, WorkerMessage } from '../types';
-export function startJob(job: Job, onProgress: (text: string, progress?: EncodeProgress) => void, onConfirmation: (memoryBytes: number) => void) {
+export function startJob(job: Job, onProgress: (text: string, progress?: EncodeProgress) => void, onConfirmation: (memoryBytes: number) => void, onGpuFailure: () => void = () => {}) {
   const worker = new Worker(new URL('../codec.worker.ts', import.meta.url), { type: 'module' });
   let rejectJob: (reason: Error) => void;
   let settled = false;
@@ -7,6 +7,7 @@ export function startJob(job: Job, onProgress: (text: string, progress?: EncodeP
     rejectJob = reject;
     const fail = (message: string) => { settled = true; worker.terminate(); reject(new Error(message)); };
     worker.onmessage = ({ data }: MessageEvent<WorkerMessage>) => {
+      if (data.type === 'gpu-failure') onGpuFailure();
       if (data.type === 'progress') onProgress(data.text, data.progress);
       if (data.type === 'confirmation-required') onConfirmation(data.memoryBytes);
       if (data.type === 'error') fail(data.error);

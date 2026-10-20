@@ -4,7 +4,7 @@ import { loadCoolChicRuntime } from './coolchic-runtime';
 
 // Full reference MSE intra training and real bitstream decoding, in a dedicated
 // WASM module/worker, with optional GPU-resident forward/backward execution.
-export async function loadCoolChic(settings: Settings, progress: (text: string, info?: EncodeProgress) => void) {
+export async function loadCoolChic(settings: Settings, progress: (text: string, info?: EncodeProgress) => void, onGpuFailure: () => void = () => {}) {
   const point = settings.coolchicPoint ?? 'lop';
   const iterations = settings.coolchicIterations ?? 2000;
   const lambda = settings.coolchicLambda ?? 0.001;
@@ -27,6 +27,11 @@ export async function loadCoolChic(settings: Settings, progress: (text: string, 
       notices.push(`CPU training backend: WASM SIMD · ${runtime.threads} thread${runtime.threads === 1 ? '' : 's'}.`);
       let encoder: InstanceType<typeof CoolChicEncoder> | undefined;
       let acceleration: GraphAcceleration | undefined;
+      let gpuFailed = false;
+      const reportGpuFailure = () => {
+        if (!gpuFailed) onGpuFailure();
+        gpuFailed = true;
+      };
       try {
         if (settings.coolchicGpu !== false && image.width * image.height >= 16384) {
           try {
@@ -34,6 +39,7 @@ export async function loadCoolChic(settings: Settings, progress: (text: string, 
             acceleration = await createCoolChicGraphAcceleration();
             setCoolChicGraphAccelerator(acceleration.gradient);
           } catch (error) {
+            reportGpuFailure();
             notices.push(`WebGPU training unavailable; using CPU WASM. ${error instanceof Error ? error.message : String(error)}`);
           }
         }
@@ -41,6 +47,7 @@ export async function loadCoolChic(settings: Settings, progress: (text: string, 
         encoder = new CoolChicEncoder(new Uint8Array(image.data.buffer, image.data.byteOffset, image.data.byteLength), image.width, image.height, point, iterations, lambda);
         let lastProgress = -Infinity;
         while (!encoder.step()) {
+          if (acceleration?.failure) reportGpuFailure();
           const now = performance.now();
           if (now - lastProgress >= 100) {
             const quantizing = encoder.completed >= iterations;
@@ -63,7 +70,10 @@ export async function loadCoolChic(settings: Settings, progress: (text: string, 
       } finally {
         setCoolChicGraphAccelerator(undefined);
         encoder?.free();
-        if (acceleration?.failure) notices.push(`WebGPU training fell back to CPU WASM: ${acceleration.failure}`);
+        if (acceleration?.failure) {
+          reportGpuFailure();
+          notices.push(`WebGPU training fell back to CPU WASM: ${acceleration.failure}`);
+        }
         if (acceleration?.calls) notices.push(`WebGPU tensor graph: ${acceleration.calls} training iterations${acceleration.batches ? ` in ${acceleration.batches} GPU batches` : ''}, ${acceleration.evaluations} RD evaluations. Portable decoding uses WASM.`);
         else if (settings.coolchicGpu === false) notices.push('WebGPU training disabled.');
         else if (image.width * image.height < 16384) notices.push('Small image: CPU SIMD avoids GPU graph startup overhead.');

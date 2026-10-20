@@ -12,10 +12,10 @@ const wasmOptions = (url: string) => ({ locateFile: () => new URL(url, import.me
 
 // Explicit single-threaded factories avoid nested Emscripten workers and work without
 // SharedArrayBuffer/cross-origin isolation. All transforms still execute in WASM.
-export async function loadCodec(format: Exclude<Format, 'jpegai'>, s: Settings, progress: (text: string) => void = () => {}) {
+export async function loadCodec(format: Exclude<Format, 'jpegai'>, s: Settings, progress: (text: string) => void = () => {}, onGpuFailure: () => void = () => {}) {
   if (format === 'coolchic') {
     const { loadCoolChic } = await import('./coolchic');
-    return loadCoolChic(s, progress);
+    return loadCoolChic(s, progress, onGpuFailure);
   }
   if (format === 'jpeg') {
     const [{ default: factory }, { defaultOptions }, { default: decode, init: initDecoder }] = await Promise.all([

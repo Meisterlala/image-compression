@@ -5,11 +5,12 @@ import type { Settings } from '../types';
 import MetricTooltip from './MetricTooltip.vue';
 import { coolchicPoints, coolchicPointDescriptions, rateFromSlider, rateToSlider, iterationsFromSlider, iterationsToSlider } from '../lib/coolchic-controls';
 const settings = defineModel<Settings>({ required: true });
-defineProps<{ disabled: boolean }>();
+const props = defineProps<{ disabled: boolean; gpuFailed?: boolean }>();
 const gpuAvailability = useGpuAvailability();
 const gpuAvailable = computed(() => gpuAvailability.value === 'available' &&
   (settings.value.format !== 'coolchic' || globalThis.crossOriginIsolated));
 const gpuMessage = computed(() => {
+  if (props.gpuFailed) return 'WebGPU did not work';
   if (gpuAvailability.value === 'checking') return 'Checking WebGPU availability…';
   if (gpuAvailability.value === 'unavailable') return 'WebGPU is disabled or unavailable in your browser. Using CPU only.';
   if (!gpuAvailable.value) return 'GPU training is unavailable on this page. Using CPU only.';
@@ -61,13 +62,13 @@ const gpuDecode = computed({
       </div>
       <div class="decode-setting">
         <label class="checkbox-row"><input v-model="gpuDecode" type="checkbox" :disabled="!gpuAvailable" :aria-describedby="id('gpu-status')"> GPU decoding</label>
-        <span :id="id('gpu-status')" :class="{ 'gpu-unavailable': gpuAvailability !== 'checking' && !gpuAvailable }" role="status">{{ gpuMessage || (gpuDecode ? 'Will try WebGPU decoding' : 'Using CPU only') }}</span>
+        <span :id="id('gpu-status')" :class="{ 'gpu-unavailable': gpuFailed || (gpuAvailability !== 'checking' && !gpuAvailable) }" role="status">{{ gpuMessage || (gpuDecode ? 'Will try WebGPU decoding' : 'Using CPU only') }}</span>
       </div>
     </template>
     <template v-else-if="settings.format === 'coolchic'">
       <div class="decode-setting">
-        <label class="checkbox-row"><input v-model="coolchicGpu" type="checkbox" :disabled="!gpuAvailable" :aria-describedby="id('gpu-status')"> GPU training</label>
-        <span :id="id('gpu-status')" :class="{ 'gpu-unavailable': gpuAvailability !== 'checking' && !gpuAvailable }" role="status">{{ gpuMessage || (coolchicGpu ? 'Will try WebGPU to accelerate training' : 'Using CPU only') }}</span>
+        <label class="checkbox-row"><input v-model="coolchicGpu" type="checkbox" :disabled="!gpuAvailable" :aria-describedby="id('gpu-status')"> GPU acceleration</label>
+        <span :id="id('gpu-status')" :class="{ 'gpu-unavailable': gpuFailed || (gpuAvailability !== 'checking' && !gpuAvailable) }" role="status">{{ gpuMessage || (coolchicGpu ? 'Will try WebGPU to accelerate training' : 'Using CPU only') }}</span>
       </div>
       <div class="field coolchic-point-field">
         <div class="control-heading">
