@@ -32,7 +32,8 @@ test('lossless PNG download preserves the decoded image pixels', async ({ page }
   const bytes = Buffer.concat(chunks);
   expect(bytes.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   const actual = await page.evaluate(async base64 => {
-    const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
+    const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0));
+    const blob = new Blob([bytes], { type: 'image/png' });
     const image = await createImageBitmap(blob);
     const canvas = document.createElement('canvas');
     canvas.width = image.width; canvas.height = image.height;
