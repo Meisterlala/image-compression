@@ -4,7 +4,7 @@ import '@tensorflow/tfjs-core/dist/register_all_gradients';
 import '@tensorflow/tfjs-backend-webgpu';
 import type { WebGPUBackend } from '@tensorflow/tfjs-backend-webgpu';
 import { addN as gpuAddN } from '@tensorflow/tfjs-backend-webgpu/dist/kernels/AddN';
-import { TensorReplay, CapturedTensorGradient, useQueueTensorUploads, type GraphInputBuffer } from './coolchic-tensor-replay';
+import { TensorReplay, CapturedTensorGradient, useQueueTensorUploads, createBoundedGpuEncoder, type GraphInputBuffer } from './coolchic-tensor-replay';
 import { GpuSoap, type SoapLayout, type SoapBasis } from './coolchic-gpu-optimizer';
 import { registerFusedCoolChicKernels, fusedClippedMse, fusedImageQuant, fusedExpand, fusedQuantize, fusedRate, fusedContext, fusedFilter, fusedConvolution } from './coolchic-tensor-fused';
 
@@ -310,7 +310,7 @@ export class CoolChicTensorGraph {
       }
       device.queue.writeBuffer(this.batchInputs.noise,0,new Float32Array(noiseValues));
       device.queue.writeBuffer(this.batchInputs.scalars,0,configurations);
-      let encoder = device.createCommandEncoder();
+      let encoder = createBoundedGpuEncoder(device);
       for (let i = 0; i < iterations; i++) {
         const values = noise.subarray(i * this.latentCount, (i+1) * this.latentCount);
         await this.computeGradient(state.subarray(0,this.parameterCount), state.subarray(this.parameterCount,layout.parameters), values, options, false, false, true);

@@ -38,8 +38,10 @@ intermediates are recycled within each capture, then reserved for that plan;
 uniforms and host-written constants remain immutable. CPU tensors upload through
 `queue.writeBuffer`, without retaining mapped upload buffers in the replay. Later iterations update inputs and replay pipelines/bind
 groups without rebuilding the autodiff graph. Optimizer commands are cached too;
-noise and learning-rate data upload once per batch, and complete iterations share
-a command encoder until a SOAP basis refresh or batch boundary. Switching between training and evaluation releases the previous command plan
+noise and learning-rate data upload once per batch. Replays preserve the backend's
+bounded command-buffer submissions instead of merging whole training batches into
+one oversized command buffer. These submissions are asynchronous; weights and
+moments remain GPU-resident between them. Switching between training and evaluation releases the previous command plan
 and its optimizer bind groups, rather than retaining both GPU working sets. Target/common tensors stay cached
 until the graph descriptor changes. Gradient sums use bounded four-input groups
 to respect WebGPU storage-binding limits. Device validation errors are checked.

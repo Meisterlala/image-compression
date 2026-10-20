@@ -1,5 +1,33 @@
 import type { WebGPUBackend } from '@tensorflow/tfjs-backend-webgpu';
 
+/** Keep the backend's 256-command submission boundary. Coalescing an entire
+ * training batch into one command buffer can exhaust wgpu/Vulkan command-side
+ * resources even with ample free VRAM. Submits remain asynchronous. */
+export function createBoundedGpuEncoder(device: GPUDevice, maximum = 256): GPUCommandEncoder {
+  let current = device.createCommandEncoder(), operations = 0;
+  const flush = () => {
+    device.queue.submit([current.finish()]);
+    current = device.createCommandEncoder(); operations = 0;
+  };
+  return new Proxy(current, { get: (_target,property) => {
+    if (property === 'checkpoint') return () => {if (operations) flush();};
+    if (property === 'beginComputePass') return (descriptor?: GPUComputePassDescriptor) => {
+      const pass = current.beginComputePass(descriptor);
+      return new Proxy(pass, { get: (target,key) => {
+        if (key === 'dispatchWorkgroups') return (x: number,y?: number,z?: number) => {operations++;target.dispatchWorkgroups(x,y,z);};
+        if (key === 'dispatchWorkgroupsIndirect') return (buffer: GPUBuffer,offset: number) => {operations++;target.dispatchWorkgroupsIndirect(buffer,offset);};
+        if (key === 'end') return () => {target.end();if (operations >= maximum) flush();};
+        const value = Reflect.get(target,key,target); return typeof value === 'function' ? value.bind(target) : value;
+      } });
+    };
+    if (property === 'copyBufferToBuffer') return (source: GPUBuffer,sourceOffset: number,destination: GPUBuffer,destinationOffset: number,size: number) => {
+      current.copyBufferToBuffer(source,sourceOffset,destination,destinationOffset,size);
+      if (++operations >= maximum) flush();
+    };
+    const value = Reflect.get(current,property,current); return typeof value === 'function' ? value.bind(current) : value;
+  } });
+}
+
 type Encode = (encoder: GPUCommandEncoder) => void;
 interface Batch { commands: Encode[] }
 export interface GraphInputBuffer { kind: 'parameters' | 'latents' | 'noise'; offset: number; length: number; buffer: GPUBuffer }
@@ -169,7 +197,7 @@ export class CapturedTensorGradient {
       if (!(values.buffer instanceof ArrayBuffer)) values = new Float32Array(values);
       this.device.queue.writeBuffer(input.buffer, 0, values as Float32Array<ArrayBuffer>);
     }
-    const encoder = this.device.createCommandEncoder();
+    const encoder = createBoundedGpuEncoder(this.device);
     this.encode(encoder);
     encoder.copyBufferToBuffer(this.output, 0, this.staging, 0, this.count * 4);
     this.device.queue.submit([encoder.finish()]);
@@ -178,7 +206,12 @@ export class CapturedTensorGradient {
     finally { this.staging.unmap(); }
   }
   private encode(encoder: GPUCommandEncoder) {
-    for (const batch of this.batches) for (const command of batch.commands) command(encoder);
+    const bounded = encoder as GPUCommandEncoder & {checkpoint?: () => void};
+    for (const batch of this.batches) {
+      bounded.checkpoint?.();
+      for (const command of batch.commands) command(encoder);
+      bounded.checkpoint?.();
+    }
   }
   /** No mapAsync/readback: the optimizer consumes gradients directly. */
   encodeDevice(encoder: GPUCommandEncoder, state: GPUBuffer, parameterCount: number, noise: GPUBuffer, noiseOffset: number) {

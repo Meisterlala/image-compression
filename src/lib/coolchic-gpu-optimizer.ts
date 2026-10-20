@@ -1,3 +1,5 @@
+import { createBoundedGpuEncoder } from './coolchic-tensor-replay';
+
 // GPU-resident reference SOAP, including its first-update skip and latent
 // Adam-like groups. Only the small eigendecomposition/QR problems visit WASM.
 export interface SoapAxis { dimension: number; stride: number; gram: number; basis: number; order: number }
@@ -191,7 +193,7 @@ export class GpuSoap {
           }
           offset += length;
         }
-        encoder = this.device.createCommandEncoder();
+        encoder = createBoundedGpuEncoder(this.device);
         if (refresh) for (const tensor of this.layout.tensors) {
           for (const axis of tensor.axes.filter(axis => axis.dimension !== 1)) {
             this.dispatch(encoder, tensor.length, `
