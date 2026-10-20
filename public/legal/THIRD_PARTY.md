@@ -42,6 +42,11 @@ third-party code and data. Open-source terms are not patent clearance.
   - libaom: https://aomedia.googlesource.com/aom/+/refs/heads/main/LICENSE
   - dav1d: https://code.videolan.org/videolan/dav1d/-/blob/master/COPYING
   - libjxl: https://github.com/libjxl/libjxl/blob/main/LICENSE
+- TensorFlow.js core / WebGPU backend 4.22.0 (and its CPU helper package):
+  Copyright Google LLC and contributors, Apache-2.0 (tfjs-LICENSE.txt).
+  The full Cool-chic tensor graph uses the WebGPU kernels; CPU forwarding is
+  disabled. No pretrained model or weights are provided by TensorFlow.js.
+  Source: https://github.com/tensorflow/tfjs/tree/tfjs-v4.22.0
 - Vue: Copyright (c) 2018-present Yuxi (Evan) You and Vue contributors, MIT.
   Full text: vue-LICENSE.txt. Source: https://github.com/vuejs/core
 
