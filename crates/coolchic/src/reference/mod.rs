@@ -9,6 +9,7 @@ pub mod convolution;
 pub mod pyramid;
 pub mod quantizer;
 pub mod rate;
+pub mod soap;
 pub mod tensor;
 pub mod upsampling;
 

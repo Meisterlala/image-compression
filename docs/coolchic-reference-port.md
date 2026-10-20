@@ -1,6 +1,6 @@
 # Cool-chic v5 reference port — in progress
 
-Target: full **RGB still-image** reference encoding and decoding, locally in the browser. Upstream: Orange-OpenSource/Cool-Chic v5.0.0, commit `a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6`. Upstream BSD-3-Clause notice is in `crates/coolchic/UPSTREAM-LICENSE.txt`.
+Target: full **RGB still-image** reference encoding and decoding, locally in the browser. Upstream: Orange-OpenSource/Cool-Chic v5.0.0, commit `a2f9f84f9e1ab31cacc0a882fdba0cd900add4d6`. Upstream BSD-3-Clause notice is in `crates/coolchic/UPSTREAM-LICENSE.txt`. SOAP's MIT notice is in `crates/coolchic/SOAP-LICENSE.txt`; the portable Rust eigendecomposition/QR backend is nalgebra.
 
 **Not complete. The app still runs the old reduced encoder.** New reference operators live separately in `crates/coolchic/src/reference/`; nothing silently substitutes the reduced implementation for full reference behavior.
 
@@ -15,6 +15,7 @@ Forward and analytical reverse-mode implementations, checked against fixtures pr
 - Full learned latent pyramid, including odd-size cropping, shared/per-level kernels and gradient accumulation.
 - Residual ARM MLP, optional stabiliser, IFCE linear network primitive, causal spatial contexts and zero-padded gradient scatter.
 - Actual Laplace rate (not an L1 proxy), probability floor, scale clamp and analytical gradients into latents and ARM outputs.
+- SOAP in the reference trainer's configuration: per-axis Shampoo matrices/eigenbases, projected moments, periodic QR refresh, second-moment reorder, bias correction and post-update weight decay. Latent group uses the reference's unpreconditioned Adam-like update, including its skipped first step. Tests replay 25-step PyTorch trajectories across matrices, convolutions, biases, capped dimensions and latent grids, with a mid-run learning-rate change.
 
 The fixtures cover single-pixel and odd-sized tensors, learned nonzero filters, gradients of inputs and every network/filter parameter, and multiple soft-round temperatures. Numerical parity uses absolute/relative float32 tolerances, not bit-exact claims.
 
@@ -23,7 +24,7 @@ Upstream v5's `ste` branch assigns its result inside `torch.no_grad`, detaching 
 ## Remaining before replacing the app codec
 
 - Assemble cross-resolution IFCE contexts and integrate the neural modules into a complete training graph.
-- Reference SOAP network optimizer and Adam-like latent updates, clipping, warm-up candidate selection, schedules, validation/checkpoint selection and quantization search.
+- Gradient clipping, warm-up candidate selection, schedules, validation/checkpoint selection and quantization search around the ported optimizer.
 - Reference architecture/configuration choices and parameter initialization; wire rate constraint and iteration controls to actual reference settings, not the old quality/pass shortcuts.
 - Generalized bitstream headers/neural parameter parsing, integer ARM/IFCE and entropy coding for reference architectures; complete image reconstruction.
 - Independent reference-produced bitstreams and end-to-end forward/backward interoperability tests, including LOP/MOP/HOP configurations.

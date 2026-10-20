@@ -15,6 +15,7 @@ wasm = ["dep:wasm-bindgen"]
 wasm-bindgen = { version = "0.2", optional = true }
 constriction = "=0.4.2"
 probability = "0.20"
+nalgebra = { version = "0.34", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 serde_json = "1"

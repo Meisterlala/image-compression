@@ -30,6 +30,7 @@ def main():
     sys.path.insert(0, str(reference))
     import torch
     from coolchic.component.core.synthesis import Synthesis, SynthesisConv2d
+    from coolchic.training.soap import SOAP
     from coolchic.component.core.arm import Arm, ArmLinear, _get_neighbor, _get_non_zero_pixel_ctx_index, _laplace_cdf
     from coolchic.component.core.upsampling import (
         Upsampling, UpsamplingSeparableSymmetricConv2d,
@@ -69,7 +70,7 @@ def main():
         return {"weight": flat(module.weight.grad), "bias": flat(module.bias.grad)}
 
     cases = {"upstream_revision": REVISION, "pytorch_version": str(torch.__version__), "convolution": [], "synthesis": [], "filter": [],
-        "quantizer": [], "arm": [], "context": [], "rate": [], "pyramid": []}
+        "quantizer": [], "arm": [], "context": [], "rate": [], "pyramid": [], "soap": []}
     for height, width in [(1, 1), (3, 5)]:
         for kernel, residual, relu in [(1, False, False), (3, False, True), (3, True, True)]:
             module = SynthesisConv2d(3, 3 if residual else 2, kernel, residual)
@@ -209,6 +210,27 @@ def main():
     uniform = torch.tensor([0.0, 0.01, 0.25, 0.5, 0.75, 0.99, 1.0])
     cases["noise"] = [{"a": a, "uniform": flat(uniform),
         "output": flat(generate_kumaraswamy_noise(uniform, torch.tensor(a)))} for a in [1.0, 2.0, 5.0]]
+    for shape, group, max_dimension in [([3, 2], "network", 256), ([2, 3, 3, 3], "network", 256),
+            ([5], "network", 256), ([3, 2], "network", 2), ([1, 1, 3, 5], "latent", 0)]:
+        torch.manual_seed(873)
+        initial = torch.randn(shape) * 0.2
+        parameter = torch.nn.Parameter(initial.clone())
+        config = {"lr": 0.01, "betas": (0.9, 0.999) if group == "latent" else (0.95, 0.95),
+            "precondition_frequency": 1 if group == "latent" else 10,
+            "max_precond_dim": max_dimension, "merge_dims": False, "precondition_1d": False,
+            "weight_decay": 0.0 if group == "latent" else 0.01}
+        optimizer = SOAP([parameter], **config)
+        steps = []
+        for index in range(25):
+            gradient = torch.randn(shape) * 0.1
+            parameter.grad = gradient
+            learning_rate = 0.01 if index < 12 else 0.002
+            optimizer.param_groups[0]["lr"] = learning_rate
+            optimizer.step()
+            steps.append({"learning_rate": learning_rate, "gradient": flat(gradient), "parameter": flat(parameter)})
+        cases["soap"].append({"shape": shape, "group": group, "max_dimension": max_dimension,
+            "initial": flat(initial), "steps": steps})
+
     path = ROOT / "crates/coolchic/tests/fixtures/reference-operators.json"
     serialized = json.dumps(cases, separators=(",", ":"), allow_nan=False) + "\n"
     if args.write_fixtures:
