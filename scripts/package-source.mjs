@@ -24,6 +24,8 @@ const args = [
   '--exclude=src/wasm-coolchic',
   '--exclude=src/wasm-coolchic-threads',
   'src', 'crates', 'scripts', 'tests', 'docs', 'deploy', 'public/legal',
+  'public/icon.svg', 'public/favicon.ico', 'public/apple-touch-icon.png',
+  'public/robots.txt', 'public/sitemap.xml',
   'public/models/manifest.json', 'public/models/manifest-hop.json', 'public/models/manifest-sop.json', 'index.html', 'package.json', 'package-lock.json',
   'tsconfig.json', 'vite.config.ts', 'playwright.config.ts',
   'Dockerfile', '.dockerignore', '.gitignore', 'LICENSE', 'README.md',

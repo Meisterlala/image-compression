@@ -8,7 +8,8 @@ const props = defineProps<{ source: ImageData; downscaled: boolean; results: Par
 type Selection = 'source' | Format;
 const left = usePersistentRef<Selection>('comparison-left', 'source');
 const right = usePersistentRef<Selection>('comparison-right', 'source');
-const savedRight = right.value;
+// An old selection for a cleared codec is not a valid selection for a new image.
+const savedRight = right.value !== 'source' && props.results[right.value] ? right.value : 'source';
 for (const selection of [left, right]) {
   if (selection.value !== 'source' && !props.results[selection.value]) selection.value = 'source';
 }
@@ -111,6 +112,6 @@ select {
 
 @media (max-width: 560px) {
   .image-choices { gap: 10px; padding: 14px; }
-  select { padding: 9px 5px; font-size: 12px; }
+  select { padding: 9px 5px; font-size: 16px; min-height: 44px; }
 }
 </style>

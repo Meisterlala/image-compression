@@ -4,14 +4,41 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="light dark">
-    <meta name="theme-color" content="#f3f5f4" media="(prefers-color-scheme: light)">
-    <meta name="theme-color" content="#101716" media="(prefers-color-scheme: dark)">
-    <meta name="description" content="Technical demonstration of JPEG AI, JPEG, AVIF, JPEG XL and experimental Cool-chic compression using local CPU WebAssembly.">
-    <title>Image compression</title>
-    <link rel="icon" href="data:,">
+    <meta name="theme-color" content="#f7f8f4" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#111a16" media="(prefers-color-scheme: dark)">
+    <title>Image compression — Compare JPEG, AVIF, JPEG XL &amp; AI</title>
+    <meta name="description" content="Compare JPEG, AVIF, JPEG XL, JPEG AI and Cool-chic in your browser. Inspect image quality, file size and speed with real codecs. No image uploads.">
+    <meta name="author" content="Meisterlala">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://compress.meisterlala.dev/">
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Image compression",
+        "url": "https://compress.meisterlala.dev/",
+        "description": "Compare JPEG, AVIF, JPEG XL, JPEG AI and Cool-chic locally using WebAssembly, decoded previews and image quality metrics.",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Any OS with a modern browser",
+        "browserRequirements": "Requires JavaScript and WebAssembly. WebGPU is optional.",
+        "isAccessibleForFree": true,
+        "author": { "@type": "Person", "name": "Meisterlala", "url": "https://meisterlala.dev/" },
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html"
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
+    <noscript>
+      <main class="noscript">
+        <h1>Image compression</h1>
+        <p>Compare JPEG, AVIF, JPEG XL, JPEG AI and Cool-chic locally in your browser. Inspect image quality, file size, PSNR, SSIM and encoding speed without uploading your images.</p>
+        <p>Enable JavaScript to use this tool. A modern browser with WebAssembly is required; WebGPU acceleration is optional.</p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /models/
+Disallow: /source.tar.gz
+
+Sitemap: https://compress.meisterlala.dev/sitemap.xml

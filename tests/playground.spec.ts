@@ -85,6 +85,12 @@ async function run(page: Page, format: string) {
 }
 
 test('JPEG AI GPU toggle defaults on, warns on fallback and supports persistent CPU opt-out', async ({ page }) => {
+  // Make the main-thread availability probe deterministic, even on headless machines.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'gpu', { configurable: true, value: {
+      requestAdapter: async () => ({ requestDevice: async () => ({ destroy() {} }) }),
+    } });
+  });
   // Simulate a browser without worker WebGPU even on GPU-equipped test machines.
   await page.route('**/assets/codec.worker-*.js', async route => {
     const response = await route.fetch();
@@ -114,12 +120,22 @@ test('JPEG AI GPU toggle defaults on, warns on fallback and supports persistent 
   await upload(page);
   await run(page, 'jpegai');
   const panel = pane(page, 'jpegai');
-  await expect(panel.locator('[data-decode-backend]')).toHaveAttribute('data-decode-backend', 'cpu');
-  await expect(panel.locator('.gpu-warning')).toHaveText('WebGPU unavailable — decoded on CPU.');
+  const gpuStatus = panel.locator('.decode-setting > span');
+  await expect(gpuStatus).toHaveText('WebGPU did not work');
+  await expect(gpuStatus).toHaveClass('gpu-unavailable');
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(gpuStatus).toHaveCSS('color', colorScheme === 'light' ? 'rgb(138, 58, 46)' : 'rgb(241, 162, 147)');
+  }
+  await expect(panel.locator('.output-actions')).not.toContainText(/CPU|WebGPU/);
+  await expect(panel.locator('.gpu-warning, [data-decode-backend]')).toHaveCount(0);
+  await page.reload();
+  await expect(gpuStatus).toHaveText('WebGPU did not work');
+  await expect(gpuStatus).toHaveClass('gpu-unavailable');
   await toggle.uncheck();
   await run(page, 'jpegai');
-  await expect(panel.locator('[data-decode-backend]')).toHaveAttribute('data-decode-backend', 'cpu');
-  await expect(panel.locator('.gpu-warning')).toHaveCount(0);
+  await expect(gpuStatus).toHaveText('Using CPU only');
+  await expect(gpuStatus).not.toHaveClass('gpu-unavailable');
   await page.reload();
   await expect(toggle).not.toBeChecked();
 });
@@ -139,7 +155,7 @@ test('codec tabs retain five real WASM outputs with one visible panel', async ({
   }
   await expect(page.locator('.page-header a')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Select image', exact: true })).toBeVisible();
-  await expect(page.locator('.file-description')).toHaveText('Your image is processed only locally in your browser.');
+  await expect(page.locator('.file-description')).toHaveCount(0);
   const originalBytes = await upload(page);
   await expect(page.getByLabel('Original image', { exact: true })).toBeVisible();
   await expect(page.locator('.comparison canvas')).toHaveCount(0);

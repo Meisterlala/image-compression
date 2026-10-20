@@ -69,7 +69,7 @@ function original(metric: Metric): string {
 
 <template>
   <section class="comparison-card" aria-labelledby="comparison-title">
-    <h2 id="comparison-title">Comparison table</h2>
+    <div class="comparison-heading"><div><h2 id="comparison-title">Comparison table</h2><p>{{ Object.keys(results).length ? 'Your results, measured from the actual decoded output.' : 'Encode your image to start comparing. Each codec keeps its own result.' }}</p></div><span class="scroll-hint" aria-hidden="true">Swipe to explore ↔</span></div>
     <div class="table-scroll" tabindex="0" aria-label="Scroll comparison table">
       <table aria-label="Image format comparison">
         <thead>
@@ -131,12 +131,12 @@ function original(metric: Metric): string {
   background: var(--paper);
 }
 
-h2 {
-  margin: 0;
-  padding: 16px;
-  font-size: 16px;
-  font-weight: 600;
-}
+.comparison-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 22px; }
+h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.comparison-heading p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.scroll-hint { display: none; color: var(--accent); font-size: 10px; white-space: nowrap; }
+@media (max-width: 900px) { .scroll-hint { display: block; } }
+@media (max-width: 560px) { .comparison-heading { padding: 18px 16px; flex-direction: column; align-items: flex-start; gap: 10px; } }
 
 .table-scroll {
   overflow-x: auto;
@@ -179,7 +179,8 @@ tbody td {
 }
 
 .format-link {
-  padding: 0;
+  padding: 8px 0;
+  min-height: 36px;
   border: 0;
   background: none;
   color: inherit;

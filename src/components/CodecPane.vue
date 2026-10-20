@@ -34,7 +34,7 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
 <template>
   <section class="codec-pane" :data-codec="format.id" :data-phase="status.phase" :aria-labelledby="`${format.id}-title`" :aria-busy="status.phase === 'running' || status.phase === 'queued'">
     <header class="pane-heading">
-      <h2 :id="`${format.id}-title`">{{ format.label }}</h2>
+      <div><h2 :id="`${format.id}-title`">{{ format.label }}</h2><p class="codec-description">{{ format.description }}</p></div>
     </header>
     <section class="pane-settings" aria-label="Settings">
       <ModelLibrary
@@ -54,7 +54,7 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
     <p v-if="status.error" class="error" role="alert">{{ status.error }}</p>
     <p v-if="changed" class="changed-note">Settings or image size changed. Showing the previous result; encode again to update it.</p>
     <p v-else-if="result && working" class="changed-note">Showing the previous result while this job runs.</p>
-    <div class="output-actions" :class="{ 'no-output': !result }">
+    <div class="output-actions" role="group" :aria-label="`${format.label} encoding actions`">
       <div v-if="status.phase === 'confirming'" class="memory-warning" role="alert">
         <strong>Large {{ format.label }} encode</strong>
         <p>Estimated working memory: {{ ((status.confirmationBytes ?? 0) / 1073741824).toFixed(2) }} GiB. This may be slow or cause the browser to run out of memory.</p>
@@ -66,6 +66,7 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
       <template v-else>
         <button v-if="working" class="cancel-button" @click="emit('cancel')">{{ status.phase === 'queued' ? 'Cancel queued job' : 'Cancel encoding' }}</button>
         <button v-else class="encode-button" :disabled="!source || importing || modelBusy || (format.id === 'jpegai' && !modelsReady)" @click="emit('encode')">{{ result ? 'Encode again' : 'Encode' }}</button>
+        <p v-if="!source" class="empty-guidance">Choose an image above to start encoding.</p>
         <p v-if="source && format.id === 'jpegai' && !modelsReady && !modelBusy && !working" class="pane-status">{{ settings.rateMode === 'target' ? 'Download all four models to use automatic model selection.' : 'Download the selected model before encoding.' }}</p>
         <p v-if="working" class="pane-status" role="status" aria-live="polite">{{ status.message }}</p>
         <div v-if="working && status.progress" class="encode-progress">
@@ -76,10 +77,8 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
           </div>
         </div>
       </template>
+      <ResultDownloads v-if="result" :result="result" :file="file" />
     </div>
-    <p v-if="result?.decodeBackend" class="pane-status" :data-decode-backend="result.decodeBackend">Preview decoded with {{ result.decodeBackend === 'webgpu' ? 'WebGPU' : 'CPU' }} · Encoding uses CPU.</p>
-    <p v-if="result?.decodeWarning" class="gpu-warning" role="status" :title="result.decodeWarning">WebGPU unavailable — decoded on CPU.</p>
-    <ResultDownloads v-if="result" :result="result" :file="file" />
   </section>
 </template>
 
@@ -88,16 +87,11 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
 .encode-progress progress { width: 100%; height: 10px; accent-color: var(--accent); }
 .progress-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .25rem 1rem; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
-.gpu-warning {
-  color: var(--muted);
-  font-size: 12px;
-  margin: 6px 0;
-}
-
 .codec-pane {
   container-type: inline-size;
   min-width: 0;
-  padding: 18px;
+  padding: 24px;
+  box-shadow: var(--card-shadow);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--paper);
@@ -108,8 +102,11 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 14px;
+  margin-bottom: 22px;
 }
+
+.codec-description { max-width: 680px; margin: 9px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.empty-guidance { max-width: 330px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; text-align: center; }
 
 h2 {
   margin: 0;
@@ -121,15 +118,12 @@ h2 {
   display: grid;
   justify-items: center;
   gap: 10px;
-  margin: 16px 0;
-  padding: 12px;
-}
-
-.output-actions.no-output {
-  min-height: 128px;
+  margin: 20px 0 0;
+  padding: 22px 16px;
+  min-height: 156px;
   align-content: center;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--surface);
 }
 
@@ -196,13 +190,13 @@ h2 {
   margin-bottom: 20px;
 }
 
-@media (max-width: 420px) {
-  .codec-pane {
-    padding: 12px;
-  }
-
-  .pane-heading {
-    gap: 10px;
-  }
+@media (max-width: 800px) {
+  .pane-heading { flex-direction: column; gap: 12px; }
+}
+@media (max-width: 560px) {
+  .codec-pane { padding: 16px; }
+  .codec-description { font-size: 13px; }
+  .output-actions { padding: 12px 8px; }
+  .output-actions button { min-width: 0; width: 100%; max-width: 280px; }
 }
 </style>

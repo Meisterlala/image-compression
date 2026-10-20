@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { nextTick, ref, shallowRef } from 'vue';
 import ImageInput from './components/ImageInput.vue';
+import AppIcon from './components/AppIcon.vue';
 import CodecPane from './components/CodecPane.vue';
 import ComparisonTable from './components/ComparisonTable.vue';
 import ImageComparison from './components/ImageComparison.vue';
 import { formats, type Format, type Result } from './types';
 import { prepareImage } from './lib/image';
 import { useComparisons } from './lib/comparisons';
-
 import { usePersistence, usePersistentRef, usePersistentState } from './lib/persistence';
 
 const { error: storageError } = usePersistence();
@@ -68,7 +68,7 @@ usePersistentState<Workspace>('workspace', {
     if (image) for (const { id } of formats) {
       if (!saved.results[id]) continue;
       results[id] = saved.results[id];
-      Object.assign(status[id], { phase: 'done', message: 'Restored from browser storage.' });
+      Object.assign(status[id], { phase: 'done', message: 'Restored from browser storage.', gpuFailed: !!saved.results[id]?.decodeWarning });
     }
   },
 });
@@ -101,11 +101,13 @@ async function loadFile(chosen: File, resizing = false) {
 </script>
 
 <template>
+  <a class="skip-link" href="#playground">Skip to the playground</a>
   <div class="app-shell">
     <header id="original-image" class="page-header" tabindex="-1">
       <div class="intro">
-        <h1>Image compression</h1>
+        <h1><AppIcon />Image compression</h1>
         <p>Compare JPEG AI, JPEG, AVIF, JPEG XL and Cool-chic 5.0 on your own image. Adjust compression and compare image quality, file size, and encoding and decoding times.</p>
+        <span class="local-note">Runs locally in your browser. No image is uploaded to a server.</span>
       </div>
       <ImageInput
         v-model:size="downscaleSize"
@@ -119,7 +121,7 @@ async function loadFile(chosen: File, resizing = false) {
         @resize="file && loadFile(file, true)"
       />
     </header>
-    <main>
+    <main id="playground" tabindex="-1">
       <p v-if="storageError" class="error-panel" role="alert">{{ storageError }}</p>
       <span v-if="importing" class="import-status" role="status">Opening image…</span>
       <p v-if="error" class="error-panel" role="alert">{{ error }}</p>
@@ -164,97 +166,32 @@ async function loadFile(chosen: File, resizing = false) {
 </template>
 
 <style scoped>
-.app-shell {
-  max-width: 1440px;
-  padding: 0 28px 28px;
-  margin: auto;
+.app-shell { max-width: 1440px; padding: 0 28px 12px; margin: auto; }
+.page-header { display: grid; grid-template-columns: minmax(0, 1fr) 440px; align-items: center; gap: 32px; padding: 28px 0; border-bottom: 1px solid var(--line); }
+.intro { max-width: 540px; }
+h1 { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -.6px; }
+h1 svg { width: 38px; height: 38px; flex-shrink: 0; }
+.intro p { margin: 16px 0 12px; color: var(--muted); font-size: 14px; line-height: 1.8; }
+.local-note { color: var(--accent); font-size: 12px; }
+main { outline: none; }
+[role="tabpanel"] { scroll-margin-top: 16px; }
+.codec-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; padding: 5px; margin: 22px 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--tab-track); }
+.codec-tabs button { min-height: 46px; padding: 10px 8px; border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent; font-size: 13px; white-space: nowrap; }
+.codec-tabs button:hover { color: var(--accent); background: var(--accent-soft); }
+.codec-tabs button[aria-selected="true"] { color: var(--accent); border-color: var(--line); background: var(--paper); box-shadow: 0 1px 4px #102d2010; font-weight: 600; }
+.import-status { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; }
+.error-panel { margin: 10px 0; padding: 15px; color: var(--error-ink); background: var(--error-bg); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 800px) {
+  .page-header { grid-template-columns: minmax(0, 1fr); gap: 22px; padding: 24px 0; }
+  .intro { max-width: none; }
 }
-
-.page-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 28px;
-  padding: 22px 0;
-  margin-bottom: 20px;
-  border-bottom: 1px solid var(--line);
-}
-
-.intro {
-  max-width: 520px;
-}
-
-.intro p {
-  margin: 12px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-}
-
-[role="tabpanel"] {
-  scroll-margin-top: 16px;
-}
-
-.codec-tabs {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  margin: 20px 0 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-.codec-tabs button {
-  padding: 14px 8px;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  color: var(--muted);
-  background: transparent;
-  font-size: 14px;
-}
-
-.codec-tabs button[aria-selected="true"] {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-  background: var(--accent-soft);
-  font-weight: 600;
-}
-
-.import-status {
-  display: block;
-  margin-top: 12px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.error-panel {
-  margin: 10px 0;
-  padding: 15px;
-  color: var(--error-ink);
-  background: var(--error-bg);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  font-size: 12px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 720px) {
-  .codec-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-
-  .app-shell {
-    padding: 0 14px 20px;
-  }
-
-  .page-header {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 18px;
-  }
-
+@media (max-width: 560px) {
+  .app-shell { padding: 0 14px 12px; }
+  h1 { font-size: 23px; gap: 10px; }
+  h1 svg { width: 34px; height: 34px; }
+  .intro p { font-size: 13px; margin-top: 12px; }
+  .codec-tabs { gap: 3px; padding: 4px; margin-top: 18px; }
+  .codec-tabs button { padding: 9px 2px; font-size: 11px; min-height: 44px; }
+  .codec-tabs button:last-child { white-space: normal; line-height: 1.4; }
 }
 </style>

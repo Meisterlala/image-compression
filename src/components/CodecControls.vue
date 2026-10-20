@@ -275,6 +275,7 @@ select {
 input[type="range"] {
   width: 100%;
   margin: 8px 0;
+  min-height: 24px;
   accent-color: var(--accent);
 }
 
@@ -300,12 +301,16 @@ input[type="range"] {
   align-items: center;
   gap: 8px;
   margin: 0;
+  min-height: 36px;
   font-size: 12px;
 }
 
 input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
   accent-color: var(--accent);
 }
+@media (max-width: 560px) { select { font-size: 16px; } }
 
 @container (max-width: 800px) {
   .jpegai-settings {

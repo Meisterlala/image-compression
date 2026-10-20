@@ -3,14 +3,18 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Image compression demo — about & licenses</title>
+    <title>Image compression — Implementation & licenses</title>
+    <meta name="description" content="Implementation details, codec limitations, privacy information and open-source licenses for the image compression playground.">
+    <link rel="canonical" href="https://compress.meisterlala.dev/legal/">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link rel="stylesheet" href="./legal.css">
   </head>
   <body>
     <main class="legal-page">
-      <a href="../">← Back to Image compression demo</a>
+      <a href="../">← Back to Image compression</a>
       <h1>Implementation & licenses</h1>
-      <p>Image compression demo is a static, client-side compression demonstration. Your image is read locally; no upload endpoint, external analytics, remote inference, or third-party fonts are used. Encoding, output decoding and quality metrics run in WebAssembly on your CPU. The browser imports images and prepares 8-bit sRGB pixels using its canvas APIs.</p>
+      <p>Image compression demo is a static, client-side compression demonstration. Your image is read locally; no upload endpoint, external analytics, remote inference, or third-party fonts are used. Encoding, output decoding and quality metrics run locally using WebAssembly, with optional WebGPU acceleration for neural codecs. The browser imports images and prepares 8-bit sRGB pixels using its canvas APIs.</p>
       <h2>JPEG AI is experimental</h2>
       <p>JPEG AI is the learned image compression standard ISO/IEC 6048-1. This application uses <a href="https://github.com/imazen/zenjpegai">zenjpegai</a>, pinned to commit <code>1192fca6b6c2fdc4dcf29a6c8064c53a987caf59</code>. This is not a certification of conformance. The .jai extension is a project convention, not a claim of a registered media type or native browser support.</p>
       <p>All four trained models for each of Simple, Base and High Operation Point are available in the JPEG AI tab. The table headers form a three-way full-name operating-point selector; the heading text triggers trade-off/use-case tooltips without info icons. A compact matrix shows four model rows and all three operating-point columns on desktop and mobile. Repeated per-model file sizes appear in the column headings: about 25 MiB for SOP, 26 MiB for BOP or 54 MiB for HOP. Individual sizes are shown if they differ. Selection is labelled explicitly, without status dots. A selected cell has a persistent border and checkmark; automatic selection highlights the whole column, and a summary states the active choice. Centered Download/Remove actions have distinct neutral arrow/red trash buttons. Weights are separate from the compressed image. Clicking a cell selects that specific model and point; clicking a column heading chooses automatic model selection within that family. Downloading or removing weights does not change selection. A stored-model-size total is shown below the matrix; there is no automatic cleanup or expiry. Only the Download button fetches weights, verified with SHA-256 into separate browser cache entries. Encoding is cache-only and requires the selected model, or all four models for automatic target-bitrate search (about 99 MiB, 104 MiB or 218 MiB). Table actions support removal and cancellation; no model file export/import is provided. Browser Cache Storage is required for JPEG AI, and may be evicted or denied; workers never silently download missing models.</p>

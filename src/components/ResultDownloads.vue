@@ -30,14 +30,19 @@ function saveLosslessPng() {
 .download-row {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
-  margin-top: 14px;
+  width: 100%;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
 }
 
 button {
-  padding: 8px 10px;
+  padding: 10px 14px;
+  min-height: 44px;
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: 8px;
   color: var(--ink);
   background: var(--paper);
   font-size: 12px;

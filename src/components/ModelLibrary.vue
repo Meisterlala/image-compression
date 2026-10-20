@@ -332,7 +332,7 @@ tbody tr:last-child td {
   justify-content: center;
   gap: 6px;
   min-width: 106px;
-  min-height: 28px;
+  min-height: 36px;
   padding: 5px 10px;
   line-height: 16px;
   border: 1px solid var(--line);
@@ -395,9 +395,9 @@ tbody tr:last-child td {
   }
 
   .model-action {
-    min-width: 26px;
-    width: 26px;
-    padding: 5px;
+    min-width: 36px;
+    width: 36px;
+    padding: 7px;
   }
 
   .action-label {
