@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, watch } from 'vue';
+import { usePersistentRef } from '../lib/persistence';
 import { formats, type Format, type Result } from '../types';
 import ComparisonViewer from './ComparisonViewer.vue';
 
 const props = defineProps<{ source: ImageData; downscaled: boolean; results: Partial<Record<Format, Result>>; activeFormat: Format }>();
 type Selection = 'source' | Format;
-const left = ref<Selection>('source');
-const right = ref<Selection>('source');
+const left = usePersistentRef<Selection>('comparison-left', 'source');
+const right = usePersistentRef<Selection>('comparison-right', 'source');
+const savedRight = right.value;
+for (const selection of [left, right]) {
+  if (selection.value !== 'source' && !props.results[selection.value]) selection.value = 'source';
+}
 let lastEncoded: Format | undefined;
 const sourceLabel = computed(() => props.downscaled ? 'Downscaled' : 'Original');
 
@@ -15,7 +20,7 @@ watch(() => formats.map(format => props.results[format.id]), (next, previous) =>
   const index = next.findIndex((result, index) => result && result !== previous?.[index]);
   if (index !== -1) {
     lastEncoded = formats[index]!.id;
-    right.value = lastEncoded;
+    if (previous || savedRight === 'source') right.value = lastEncoded;
   }
 }, { immediate: true });
 watch(() => props.activeFormat, format => {

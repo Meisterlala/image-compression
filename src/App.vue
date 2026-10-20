@@ -4,11 +4,14 @@ import ImageInput from './components/ImageInput.vue';
 import CodecPane from './components/CodecPane.vue';
 import ComparisonTable from './components/ComparisonTable.vue';
 import ImageComparison from './components/ImageComparison.vue';
-import { formats, type Format } from './types';
+import { formats, type Format, type Result } from './types';
 import { prepareImage } from './lib/image';
 import { useComparisons } from './lib/comparisons';
 
-const activeFormat = ref<Format>('jpegai');
+import { usePersistence, usePersistentRef, usePersistentState } from './lib/persistence';
+
+const { error: storageError, pending: saving } = usePersistence();
+const activeFormat = usePersistentRef<Format>('active-format', 'jpegai');
 function tabKey(event: KeyboardEvent, index: number) {
   let next: number;
   if (event.key === 'ArrowRight') next = (index + 1) % formats.length;
@@ -33,11 +36,49 @@ const source = shallowRef<ImageData>();
 const file = shallowRef<File>();
 const referenceBytes = ref(0);
 const downscaled = ref(false);
-const downscaleSize = ref(0);
+const downscaleSize = usePersistentRef('downscale-size', 0);
 let appliedSize = 0;
 const importing = ref(false);
 const error = ref('');
 const { settings, results, status, busy, run, confirm, cancel, reset } = useComparisons(source, referenceBytes, downscaled);
+
+// Source and outputs share one transaction, so a new upload cannot restore old results.
+interface Workspace {
+  file?: File;
+  image?: { pixels: Uint8ClampedArray<ArrayBuffer>; width: number; height: number };
+  referenceBytes: number;
+  downscaled: boolean;
+  appliedSize: number;
+  results: Partial<Record<Format, Result>>;
+}
+usePersistentState<Workspace>('workspace', {
+  snapshot: () => ({
+    file: file.value,
+    image: source.value ? { pixels: source.value.data, width: source.value.width, height: source.value.height } : undefined,
+    referenceBytes: referenceBytes.value, downscaled: downscaled.value, appliedSize,
+    results: { ...results },
+  }),
+  restore: saved => {
+    const image = saved.image ? new ImageData(saved.image.pixels, saved.image.width, saved.image.height) : undefined;
+    source.value = image;
+    file.value = saved.file;
+    referenceBytes.value = saved.referenceBytes;
+    downscaled.value = saved.downscaled;
+    appliedSize = saved.appliedSize;
+    if (image) for (const { id } of formats) {
+      if (!saved.results[id]) continue;
+      results[id] = saved.results[id];
+      Object.assign(status[id], { phase: 'done', message: 'Restored from browser storage.' });
+    }
+  },
+});
+usePersistentState('codec-settings', {
+  snapshot: () => settings,
+  restore: saved => {
+    for (const { id } of formats) Object.assign(settings[id], saved[id], { format: id });
+  },
+  deep: true,
+});
 
 async function loadFile(chosen: File, resizing = false) {
   if (busy.value || importing.value) return;
@@ -79,6 +120,8 @@ async function loadFile(chosen: File, resizing = false) {
       />
     </header>
     <main>
+      <p v-if="storageError" class="error-panel" role="alert">{{ storageError }}</p>
+      <span v-else class="import-status" role="status" data-persistence>{{ saving ? 'Saving locally…' : 'Saved locally in this browser. Clearing site data removes saved work.' }}</span>
       <span v-if="importing" class="import-status" role="status">Opening image…</span>
       <p v-if="error" class="error-panel" role="alert">{{ error }}</p>
       <div class="codec-tabs" role="tablist" aria-label="Image format">

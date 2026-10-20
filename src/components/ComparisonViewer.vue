@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { draw } from '../lib/image';
+import { usePersistentRef } from '../lib/persistence';
 
 const props = defineProps<{ left: ImageData; right: ImageData; leftLabel: string; rightLabel: string }>();
 const original = ref<HTMLCanvasElement | null>(null);
 const decoded = ref<HTMLCanvasElement | null>(null);
-const divider = ref(50);
+const divider = usePersistentRef('comparison-divider', 50);
 const splitting = ref(false);
 function updateSplit(event: PointerEvent) {
   const bounds = original.value?.getBoundingClientRect();
@@ -16,7 +17,7 @@ function startSplit(event: PointerEvent) {
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   updateSplit(event);
 }
-const zoom = ref('fit');
+const zoom = usePersistentRef('comparison-zoom', 'fit');
 const dpr = ref(window.devicePixelRatio);
 const viewportHeight = ref(window.innerHeight);
 const stageStyle = computed(() => {
