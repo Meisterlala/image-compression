@@ -161,6 +161,16 @@ impl CoolChicSoapProblem {
         self.optimizer.gpu_pack(0, self.latent, &mut state);
         state
     }
+    pub fn restore(&mut self, state: &[f32], step: usize) -> Result<(), JsError> {
+        let expected = self.state().len();
+        if state.len() != expected || state.iter().any(|v| !v.is_finite()) {
+            return Err(JsError::new("Invalid SOAP diagnostic state"));
+        }
+        let mut cursor = self.parameter.len();
+        self.parameter.copy_from_slice(&state[..cursor]);
+        self.optimizer.gpu_unpack(state, &mut cursor, step);
+        Ok(())
+    }
     pub fn update(&mut self, mut gradient: Vec<f32>, learning_rate: f64) -> Result<(), JsError> {
         if !self.latent {
             let norm = gradient.iter().map(|v| v * v).sum::<f32>().sqrt();
