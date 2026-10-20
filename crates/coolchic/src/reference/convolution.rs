@@ -95,9 +95,6 @@ impl Conv2d {
     pub fn forward(&self, input: &Tensor) -> Result<Tensor> {
         self.validate(input)?;
         let mut output = Tensor::zeros(self.output_channels, input.height, input.width)?;
-        if super::acceleration::convolution(self, input, None, &mut output.data) {
-            return Ok(output);
-        }
         #[cfg(feature = "parallel")]
         if super::parallel::worthwhile(
             input.data.len() * self.output_channels * self.kernel * self.kernel,
@@ -156,18 +153,6 @@ impl Conv2d {
         }
         if output.is_some_and(|state| !state.valid_layout() || !state.same_shape(gradient)) {
             return Err(Error("Invalid convolution activation tape shape"));
-        }
-        if super::acceleration::eligible(self, input, true) {
-            let mut accelerated = vec![0.0; input.data.len() + self.weight.len() + self.bias.len()];
-            if super::acceleration::convolution(self, input, Some(gradient), &mut accelerated) {
-                let bias = accelerated.split_off(input.data.len() + self.weight.len());
-                let weight = accelerated.split_off(input.data.len());
-                return Ok(ConvGradient {
-                    input: Tensor::new(input.channels, input.height, input.width, accelerated)?,
-                    weight,
-                    bias,
-                });
-            }
         }
         #[cfg(feature = "parallel")]
         if super::parallel::worthwhile(

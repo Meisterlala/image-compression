@@ -1,10 +1,28 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
+import { useGpuAvailability } from '../lib/gpu-availability';
 import type { Settings } from '../types';
 import MetricTooltip from './MetricTooltip.vue';
 import { coolchicPoints, coolchicPointDescriptions, rateFromSlider, rateToSlider, iterationsFromSlider, iterationsToSlider } from '../lib/coolchic-controls';
 const settings = defineModel<Settings>({ required: true });
 defineProps<{ disabled: boolean }>();
+const gpuAvailability = useGpuAvailability();
+const gpuAvailable = computed(() => gpuAvailability.value === 'available' &&
+  (settings.value.format !== 'coolchic' || globalThis.crossOriginIsolated));
+const gpuMessage = computed(() => {
+  if (gpuAvailability.value === 'checking') return 'Checking WebGPU availability…';
+  if (gpuAvailability.value === 'unavailable') return 'WebGPU is disabled or unavailable in your browser. Using CPU only.';
+  if (!gpuAvailable.value) return 'GPU training is unavailable on this page. Using CPU only.';
+  return '';
+});
+watch([gpuAvailability, () => settings.value.format], () => {
+  if (gpuAvailability.value === 'checking' || gpuAvailable.value) return;
+  if (settings.value.format === 'coolchic' && settings.value.coolchicGpu !== false) {
+    settings.value = { ...settings.value, coolchicGpu: false };
+  } else if (settings.value.format === 'jpegai' && settings.value.gpuDecode !== false) {
+    settings.value = { ...settings.value, gpuDecode: false };
+  }
+}, { immediate: true });
 const id = (field: string) => `${settings.value.format}-${field}`;
 const coolchicPoint = computed(() => Math.max(0, coolchicPoints.indexOf(settings.value.coolchicPoint)));
 const coolchicRate = computed({
@@ -16,12 +34,12 @@ const coolchicIterations = computed({
   set: (value: number) => { settings.value.coolchicIterations = iterationsFromSlider(value); },
 });
 const coolchicGpu = computed({
-  get: () => settings.value.coolchicGpu !== false,
+  get: () => gpuAvailable.value && settings.value.coolchicGpu !== false,
   set: (value: boolean) => { settings.value = { ...settings.value, coolchicGpu: value }; },
 });
 // Older persisted settings without this field also default to GPU-first.
 const gpuDecode = computed({
-  get: () => settings.value.gpuDecode !== false,
+  get: () => gpuAvailable.value && settings.value.gpuDecode !== false,
   set: (value: boolean) => { settings.value = { ...settings.value, gpuDecode: value }; },
 });
 </script>
@@ -42,14 +60,14 @@ const gpuDecode = computed({
         <input :id="id('target-bpp')" v-model.number="settings.targetBpp" type="range" min="0.1" max="2" step="0.05">
       </div>
       <div class="decode-setting">
-        <label class="checkbox-row"><input v-model="gpuDecode" type="checkbox"> GPU decoding</label>
-        <span>Falls back to CPU if unavailable</span>
+        <label class="checkbox-row"><input v-model="gpuDecode" type="checkbox" :disabled="!gpuAvailable" :aria-describedby="id('gpu-status')"> GPU decoding</label>
+        <span :id="id('gpu-status')" :class="{ 'gpu-unavailable': gpuAvailability !== 'checking' && !gpuAvailable }" role="status">{{ gpuMessage || (gpuDecode ? 'Will try WebGPU decoding' : 'Using CPU only') }}</span>
       </div>
     </template>
     <template v-else-if="settings.format === 'coolchic'">
       <div class="decode-setting">
-        <label class="checkbox-row"><input v-model="coolchicGpu" type="checkbox"> GPU training</label>
-        <span>GPU training graph · CPU fallback</span>
+        <label class="checkbox-row"><input v-model="coolchicGpu" type="checkbox" :disabled="!gpuAvailable" :aria-describedby="id('gpu-status')"> GPU training</label>
+        <span :id="id('gpu-status')" :class="{ 'gpu-unavailable': gpuAvailability !== 'checking' && !gpuAvailable }" role="status">{{ gpuMessage || (coolchicGpu ? 'Will try WebGPU to accelerate training' : 'Using CPU only') }}</span>
       </div>
       <div class="field coolchic-point-field">
         <div class="control-heading">
@@ -258,6 +276,8 @@ input[type="range"] {
   margin: 8px 0;
   accent-color: var(--accent);
 }
+
+.decode-setting > .gpu-unavailable { color: var(--danger); }
 
 .training-warning { margin: 0; border-left: 2px solid var(--danger); padding-left: .5rem; font-size: .75rem; line-height: 1.5; color: var(--muted); }
 

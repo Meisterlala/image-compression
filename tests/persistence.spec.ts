@@ -14,8 +14,29 @@ async function upload(page: Page, name = 'saved.png') {
   await expect(page.getByLabel('Original image', { exact: true })).toHaveAttribute('width', '32');
 }
 
-async function saved(page: Page) {
-  await expect(page.locator('[data-persistence]')).toContainText('Saved locally');
+async function saved(page: Page, expected: { quality: number; filename?: string; formats: string[] }) {
+  await expect.poll(() => page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('image-compression-state', 1);
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    try {
+      type Stored = { jpeg?: { quality: number }; file?: File; results?: Record<string, unknown> };
+      const records = await new Promise<Record<string, Stored>>((resolve, reject) => {
+        const transaction = database.transaction('state');
+        const request = transaction.objectStore('state').openCursor();
+        const records: Record<string, Stored> = {};
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (cursor) { records[String(cursor.key)] = cursor.value; cursor.continue(); }
+        };
+        transaction.oncomplete = () => resolve(records);
+        transaction.onabort = transaction.onerror = () => reject(transaction.error);
+      });
+      return { quality: records['codec-settings']?.jpeg?.quality,
+        filename: records.workspace?.file?.name, formats: Object.keys(records.workspace?.results ?? {}).sort() };
+    } finally { database.close(); }
+  })).toEqual(expected);
 }
 
 test('reload restores image, binary outputs, settings and viewer preferences without encoding again', async ({ page }) => {
@@ -31,7 +52,7 @@ test('reload restores image, binary outputs, settings and viewer preferences wit
   await page.getByLabel('Image comparison zoom').selectOption('2');
   await page.getByLabel('Image comparison split').fill('72');
   await panel.getByLabel(/^Quality/).fill('61');
-  await saved(page);
+  await saved(page, { quality: 61, filename: 'saved.png', formats: ['jpeg'] });
   const binary = async () => page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('image-compression-state', 1);
@@ -65,7 +86,7 @@ test('reload restores image, binary outputs, settings and viewer preferences wit
 
   // New images invalidate old outputs atomically but retain settings.
   await upload(page, 'replacement.png');
-  await saved(page);
+  await saved(page, { quality: 61, filename: 'replacement.png', formats: [] });
   await page.reload();
   await expect(panel).toHaveAttribute('data-phase', 'idle');
   await expect(panel.getByLabel(/^Quality/)).toHaveValue('61');
@@ -105,7 +126,7 @@ test('preferences survive reload even without an image', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('tab', { name: 'JPEG', exact: true }).click();
   await page.locator('[data-codec="jpeg"]').getByLabel(/^Quality/).fill('43');
-  await saved(page);
+  await saved(page, { quality: 43, formats: [] });
   await page.reload();
   await expect(page.getByRole('tab', { name: 'JPEG', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-codec="jpeg"]').getByLabel(/^Quality/)).toHaveValue('43');

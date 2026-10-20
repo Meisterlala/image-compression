@@ -15,20 +15,16 @@ function snapshot<T>(value: T): T {
 
 export interface Persistence {
   error: Ref<string>;
-  pending: Ref<number>;
   get<T>(key: string): T | undefined;
   save(key: string, value: unknown): void;
-  flush(): Promise<void>;
   install(app: App): void;
 }
 const persistenceKey: InjectionKey<Persistence> = Symbol('browser persistence');
 
 export async function createPersistence(): Promise<Persistence> {
   const error = ref('');
-  const pending = ref(0);
   const values = new Map<string, unknown>();
   let database: IDBDatabase | undefined;
-  let writes = Promise.resolve();
   const fail = () => {
     error.value = 'Browser storage is unavailable or full. Recent changes may not survive a reload. Free browser storage or allow site storage to save your work.';
   };
@@ -55,25 +51,20 @@ export async function createPersistence(): Promise<Persistence> {
   } catch { fail(); }
 
   const persistence: Persistence = {
-    error, pending,
+    error,
     get: <T>(key: string) => values.get(key) as T | undefined,
     save(key, value) {
       let copy: unknown;
       try { copy = snapshot(value); } catch { fail(); return; }
       values.set(key, copy);
       if (!database) return;
-      pending.value++;
-      // Start the transaction immediately: no debounce that can lose the last edit on reload.
-      const write = new Promise<void>((resolve, reject) => {
-        const transaction = database!.transaction(STORE, 'readwrite');
+      // Start immediately: debouncing can lose the last edit on reload.
+      try {
+        const transaction = database.transaction(STORE, 'readwrite');
+        transaction.onabort = transaction.onerror = fail;
         transaction.objectStore(STORE).put(copy, key);
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () => reject(transaction.error);
-        transaction.onerror = () => reject(transaction.error);
-      }).catch(fail).finally(() => { pending.value--; });
-      writes = Promise.all([writes, write]).then(() => {});
+      } catch { fail(); }
     },
-    flush: () => writes,
     install: app => { app.provide(persistenceKey, persistence); },
   };
   return persistence;

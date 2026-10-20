@@ -74,6 +74,45 @@ impl CoolChicEncoder {
     }
 }
 
+/// CPU kernel diagnostic for portable/threaded WASM parity checks.
+#[wasm_bindgen(js_name = coolChicCpuConvolution)]
+pub fn cpu_convolution(
+    params: &[u32],
+    input: &[f32],
+    weight: &[f32],
+    bias: &[f32],
+    gradient: Option<Vec<f32>>,
+) -> Result<Vec<f32>, JsError> {
+    use crate::reference::{Conv2d, Tensor};
+    if params.len() != 8 || (params[7] != 0) != gradient.is_some() {
+        return Err(JsError::new("Invalid convolution parameters"));
+    }
+    let layer = Conv2d {
+        input_channels: params[0] as usize,
+        output_channels: params[1] as usize,
+        kernel: params[4] as usize,
+        residual: params[5] != 0,
+        relu: params[6] != 0,
+        weight: weight.to_vec(),
+        bias: bias.to_vec(),
+    };
+    let input = Tensor::new(
+        params[0] as usize,
+        params[2] as usize,
+        params[3] as usize,
+        input.to_vec(),
+    )
+    .map_err(error)?;
+    if let Some(gradient) = gradient {
+        let gradient =
+            Tensor::new(params[1] as usize, input.height, input.width, gradient).map_err(error)?;
+        let g = layer.backward(&input, &gradient).map_err(error)?;
+        Ok([g.input.data, g.weight, g.bias].concat())
+    } else {
+        Ok(layer.forward(&input).map_err(error)?.data)
+    }
+}
+
 /// Equal-input diagnostics for full-graph CPU/GPU parity and throughput. This
 /// uses the real reference network, not a reduced benchmark architecture.
 #[wasm_bindgen]

@@ -1,5 +1,5 @@
 import type * as Portable from '../wasm-coolchic/coolchic';
-type CodecBindings = Pick<typeof Portable, 'CoolChicEncoder' | 'decodeCoolChic' | 'estimateCoolChicMemory' | 'setCoolChicAccelerator' | 'coolChicCpuConvolution' | 'CoolChicGraphProblem' | 'setCoolChicGraphAccelerator'>;
+type CodecBindings = Pick<typeof Portable, 'CoolChicEncoder' | 'decodeCoolChic' | 'estimateCoolChicMemory' | 'coolChicCpuConvolution' | 'CoolChicGraphProblem' | 'setCoolChicGraphAccelerator'>;
 let threaded: Promise<{ bindings: CodecBindings; threads: number }> | undefined;
 async function initThreads(count: number) {
   const bindings = await import('../wasm-coolchic-threads/coolchic');

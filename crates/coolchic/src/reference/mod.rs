@@ -3,7 +3,6 @@
 //! This is the application's Cool-chic encoder and decoder.
 //! Ported from Orange Cool-Chic v5.0.0 (BSD-3-Clause); see UPSTREAM-LICENSE.txt.
 
-mod acceleration;
 pub mod architecture;
 pub mod arm;
 pub mod codec;

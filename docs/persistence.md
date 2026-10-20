@@ -1,25 +1,32 @@
-# Browser-only persistence
+# Local state
 
-The workspace is saved automatically in IndexedDB (`image-compression-state`, schema version 1). Nothing is uploaded. Reloading restores the original file, prepared image, completed codec outputs (encoded bytes, decoded pixels, settings and metrics), current codec controls, selected tab, resize setting and comparison viewer preferences. Downloads continue to work without encoding again.
+`src/lib/persistence.ts` saves workspace and preferences in IndexedDB
+(`image-compression-state`, schema 1). Reload restores the source/prepared image,
+completed outputs, settings, metrics, tabs and viewer preferences. Jobs are not
+resumed. A new upload clears results but keeps preferences; resizing keeps results.
 
-The UI shows when writes are pending and warns when storage is unavailable or full. Wait for “Saved locally” before closing the page. Browser site-data clearing, private-session expiry, or automatic storage eviction can remove saved work; this is not a backup. In-progress jobs are deliberately not restored. Importing another image clears previous results while retaining preferences. Resizing retains previous outputs as before.
+Writes start immediately; storage failures show a warning. Clearing site data,
+private-session expiry or browser eviction can delete work and cached models.
+Nothing is uploaded; this is not a backup.
 
-## Vue integration
+## Vue API
 
-`src/lib/persistence.ts` provides a Vue plugin, initialized in `src/main.ts` before mounting, and two composables:
+The plugin loads before mounting in `src/main.ts`. Use stable feature keys:
 
 ```ts
 const selected = usePersistentRef('feature-selection', 'default');
-
 usePersistentState('feature-state', {
   snapshot: () => ({ /* durable fields */ }),
-  restore: saved => { /* apply saved fields, merge defaults as needed */ },
-  deep: true, // for nested reactive settings, not large pixel buffers
+  restore: saved => { /* apply fields */ },
+  deep: true, // nested settings only, not large pixel buffers
 });
 ```
 
-Use stable, feature-specific keys. State is restored synchronously during setup, then watched using Vue's batched updates. Snapshots unwrap Vue proxies and IndexedDB preserves File, Blob and typed-array values. Store related state together when it must be updated atomically; the source image and all results are one workspace record. Keep large binaries separate from frequently changed settings to avoid rewriting them with each slider movement.
+Restoration is synchronous during setup; scoped Vue watches batch later writes.
+Snapshots unwrap proxies and preserve File, Blob and typed arrays. Store related
+state together for atomic updates (source and outputs share a workspace record),
+but keep binaries apart from frequently changed controls. Persist bytes, not
+workers, queues, progress, DOM nodes or object URLs. Store ImageData as dimensions
+and pixels. Use a new key for incompatible record changes.
 
-Do not persist transient workers, job queues, progress, DOM nodes, or object URLs. Store underlying bytes instead. ImageData is represented explicitly by width, height and pixels because browser structured-clone support for ImageData varies. For incompatible future record changes, migrate the record or use a new key. Reactive watches are disposed with their Vue component scope.
-
-Run `npx playwright test tests/persistence.spec.ts` after `npm run build:web` for reload, download integrity, image replacement and denied-storage coverage.
+Test: `npm run build:web && npx playwright test tests/persistence.spec.ts`.
