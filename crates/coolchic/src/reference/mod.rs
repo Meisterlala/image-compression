@@ -9,6 +9,7 @@ pub mod arm;
 pub mod codec;
 pub mod convolution;
 pub mod fixed;
+pub(crate) mod graph;
 pub mod inter_feature;
 pub mod network;
 #[cfg(feature = "parallel")]

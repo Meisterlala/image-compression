@@ -33,6 +33,47 @@ self.onmessage = async ({ data }) => {
     }
     const runtime = await loadCoolChicRuntime(!!data.threads, typeof data.threads === 'number' ? data.threads : undefined);
     const { CoolChicEncoder, setCoolChicAccelerator, coolChicCpuConvolution } = runtime.bindings;
+    if (data.type === 'graph-benchmark') {
+      const { CoolChicTensorGraph, initializeTensorGpu } = await import('../../src/lib/coolchic-tensor-graph');
+      const problem = new runtime.bindings.CoolChicGraphProblem(rgba, w, h, data.point ?? 'lop');
+      await initializeTensorGpu();
+      const spec = JSON.parse(problem.descriptor());
+      const graph = new CoolChicTensorGraph(spec, problem.target(), problem.common());
+      try {
+        const parameters = problem.parameters(), latents = problem.latents(), noise = problem.noise();
+        const options = { mode: 2, temperature: Math.fround(0.35), lambda: Math.fround(0.001) };
+        await graph.gradient(parameters, latents, noise, options);
+        const gpu = await graph.gradient(parameters, latents, noise, options);
+        const cpu = problem.cpuGradient(2, 0.35, 0.001);
+        let maxError = 0;
+        for (let i = 0; i < cpu.length; i++) {
+          maxError = Math.max(maxError, Math.abs(cpu[i] - gpu[i]));
+          if (Math.abs(cpu[i] - gpu[i]) > 3e-5 + Math.abs(cpu[i]) * 1e-3) throw new Error(`Graph gradient mismatch ${i}: GPU ${gpu[i]}, CPU ${cpu[i]}`);
+        }
+        if (data.profile) {
+          const tf = await import('@tensorflow/tfjs-core');
+          const profile = await tf.profile(async () => { await graph.gradient(parameters, latents, noise, options); return tf.scalar(0); });
+          const result = profile.result as import('@tensorflow/tfjs-core').Tensor;
+          result.dispose();
+          const totals = new Map<string, { count: number; ms: number }>();
+          for (const kernel of profile.kernels) {
+            const value = totals.get(kernel.name) ?? { count: 0, ms: 0 };
+            value.count++; value.ms += Number(await kernel.kernelTimeMs); totals.set(kernel.name, value);
+          }
+          self.postMessage({ profile: [...totals].sort((a, b) => b[1].ms - a[1].ms), kernels: profile.kernels.length });
+          return;
+        }
+        const iterations = data.repeats ?? 3;
+        let start = performance.now();
+        for (let i = 0; i < iterations; i++) problem.cpuGradient(2, 0.35, 0.001);
+        const cpuMs = (performance.now() - start) / iterations;
+        start = performance.now();
+        for (let i = 0; i < iterations; i++) await graph.gradient(parameters, latents, noise, options);
+        const gpuMs = (performance.now() - start) / iterations;
+        self.postMessage({ cpuMs, gpuMs, speedup: cpuMs / gpuMs, maxError, threads: runtime.threads });
+      } finally { graph.dispose(); problem.free(); }
+      return;
+    }
     if (data.type === 'kernel') {
       const result = coolChicCpuConvolution(new Uint32Array(data.params), new Float32Array(data.input), new Float32Array(data.weight), new Float32Array(data.bias), data.gradient ? new Float32Array(data.gradient) : undefined);
       if (!(result.buffer instanceof ArrayBuffer)) throw new Error('Expected owned diagnostic output');

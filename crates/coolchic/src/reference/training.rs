@@ -88,8 +88,22 @@ impl Optimizers {
         gradient: &super::network::Gradient,
         learning_rate: f64,
     ) -> Result<()> {
+        self.update_parameters(
+            network,
+            gradient.parameter_groups(network),
+            &gradient.latents,
+            learning_rate,
+        )
+    }
+
+    fn update_parameters(
+        &mut self,
+        network: &mut Network,
+        mut gradients: [Vec<f32>; 8],
+        latent_gradients: &[Tensor],
+        learning_rate: f64,
+    ) -> Result<()> {
         let (mut groups, _) = network.parameters();
-        let mut gradients = gradient.parameter_groups(network);
         // clip_grad_norm_(weight_parameters, 0.1), excluding latents, frozen
         // output transforms and unused filter biases (which have no gradient).
         let mut squared_norm = 0.0_f32;
@@ -116,7 +130,7 @@ impl Optimizers {
         for ((latent, gradient), optimizer) in network
             .latents
             .iter_mut()
-            .zip(&gradient.latents)
+            .zip(latent_gradients)
             .zip(&mut self.latents)
         {
             optimizer.set_learning_rate(learning_rate)?;
@@ -175,18 +189,32 @@ impl Runner {
             }
             values
         };
-        let (_, gradient) = self.network.loss_gradient(
+        let learning_rate = self.phase.learning_rate_at(self.validations);
+        if let Some(gradient) = super::graph::gradient(
+            &self.network,
             target,
             lambda,
             self.phase.quantizer,
             temperature,
             &noise,
-        )?;
-        self.optimizers.update(
-            &mut self.network,
-            &gradient,
-            self.phase.learning_rate_at(self.validations),
-        )?;
+        ) {
+            self.optimizers.update_parameters(
+                &mut self.network,
+                gradient.groups,
+                &gradient.latents,
+                learning_rate,
+            )?;
+        } else {
+            let (_, gradient) = self.network.loss_gradient(
+                target,
+                lambda,
+                self.phase.quantizer,
+                temperature,
+                &noise,
+            )?;
+            self.optimizers
+                .update(&mut self.network, &gradient, learning_rate)?;
+        }
         let count = self.iteration;
         self.iteration += 1;
         if self

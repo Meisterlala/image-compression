@@ -4,6 +4,8 @@ import '@tensorflow/tfjs-core/dist/register_all_gradients';
 import '@tensorflow/tfjs-backend-webgpu';
 import type { WebGPUBackend } from '@tensorflow/tfjs-backend-webgpu';
 import { addN as gpuAddN } from '@tensorflow/tfjs-backend-webgpu/dist/kernels/AddN';
+import { TensorReplay, CapturedTensorGradient, type GraphInputBuffer } from './coolchic-tensor-replay';
+import { registerFusedCoolChicKernels, fusedQuantize, fusedRate, fusedContext, fusedFilter, fusedConvolution } from './coolchic-tensor-fused';
 
 export interface GraphArchitecture {
   height: number; width: number; latent_min: number; latent_max: number;
@@ -38,6 +40,7 @@ async function initialize() {
   tf.env().set('WEBGPU_DEFERRED_SUBMIT_BATCH_SIZE', 256);
   if (!await tf.setBackend('webgpu')) throw new Error('WebGPU tensor backend initialization failed');
   await tf.ready();
+  registerFusedCoolChicKernels();
   const device = (tf.backend() as WebGPUBackend).device;
   device.addEventListener('uncapturederror', event => { gpuFailure = event.error.message; });
   void device.lost.then(info => { gpuFailure = info.message || 'WebGPU device lost'; });
@@ -71,6 +74,10 @@ export class CoolChicTensorGraph {
   private vars = new Map<string, tf.Variable>();
   private constants = new Map<string, tf.Tensor>();
   private latentVars: tf.Variable[];
+  private noiseVars: tf.Variable[];
+  private recorder!: TensorReplay;
+  private plan?: { key: string; graph: CapturedTensorGradient };
+  private running = false;
   private target: T4;
   private common?: T4;
   private arm: Arm;
@@ -80,10 +87,10 @@ export class CoolChicTensorGraph {
   private trunk: Conv[];
   private stabiliser?: Conv;
   private output: Conv;
-  private transformed = new Map<string, tf.Tensor>();
+  private debugParameterGradients = false;
   readonly parameterCount: number;
   readonly latentCount: number;
-  constructor(readonly spec: TensorGraphSpec, target: Float32Array, common = new Float32Array(0)) {
+  constructor(readonly spec: TensorGraphSpec, target: Float32Array, common: Float32Array = new Float32Array(0)) {
     const a = spec.architecture;
     if (!a.height || !a.width || spec.group_lengths.length !== 8 || !spec.latents.length) throw new Error('Invalid tensor graph descriptor');
     const offsets = Array<number>(8).fill(0);
@@ -115,6 +122,7 @@ export class CoolChicTensorGraph {
     this.parameterCount = offsets.reduce((a, b) => a + b, 0);
     this.latentCount = spec.latents.reduce((n, l) => n + l.height * l.width, 0);
     this.latentVars = spec.latents.map(l => tf.tidy(() => tf.variable(tf.zeros([1, l.height, l.width, 1]))));
+    this.noiseVars = spec.latents.map(l => tf.tidy(() => tf.variable(tf.zeros([1, l.height, l.width, 1]), false)));
     this.target = tf.tidy(() => tf.tensor4d(new Float32Array(target), [1, 3, a.height, a.width]).transpose([0, 2, 3, 1]) as T4);
     if (a.common_randomness) {
       this.common = tf.tidy(() => {
@@ -135,6 +143,7 @@ export class CoolChicTensorGraph {
       });
     }
     this.refs.sort((a, b) => a.group - b.group || a.offset - b.offset);
+    this.recorder = new TensorReplay(tf.backend() as WebGPUBackend);
   }
   private constant(key: string, create: () => tf.Tensor) {
     let value = this.constants.get(key);
@@ -143,28 +152,13 @@ export class CoolChicTensorGraph {
   }
   private parameter(p: Parameter) { return this.vars.get(p.key)!; }
   private convolution(x: T4, layer: Conv): T4 {
-    let weight = this.transformed.get(layer.weight.key);
-    if (!weight) {
-      weight = this.parameter(layer.weight).reshape([layer.co, layer.ci, layer.k, layer.k]).transpose([2, 3, 1, 0]);
-      this.transformed.set(layer.weight.key, weight);
-    }
-    let y = tf.conv2d(this.replicate(x, layer.k >> 1, layer.k >> 1), weight as tf.Tensor4D, 1, 'valid').add(this.parameter(layer.bias)) as T4;
-    if (layer.residual) y = y.add(x) as T4;
-    if (layer.relu) y = y.relu() as T4;
-    return y;
+    return fusedConvolution(x, this.parameter(layer.weight), this.parameter(layer.bias), layer.co, layer.k, layer.residual, layer.relu,
+      this.debugParameterGradients || layer.weight.trainable);
   }
   private runArm(x: T4, arm: Arm) {
     let y = x;
     for (const layer of arm.layers) y = this.convolution(y, layer);
     return arm.stabiliser ? y.add(this.convolution(x, arm.stabiliser)) as T4 : y;
-  }
-  private replicate(x: T4, py: number, px: number): T4 {
-    let y = x;
-    if (px) y = tf.concat([x.slice([0, 0, 0, 0], [-1, -1, 1, -1]).tile([1, 1, px, 1]), x,
-      x.slice([0, 0, x.shape[2] - 1, 0], [-1, -1, 1, -1]).tile([1, 1, px, 1])], 2) as T4;
-    if (py) y = tf.concat([y.slice([0, 0, 0, 0], [-1, 1, -1, -1]).tile([1, py, 1, 1]), y,
-      y.slice([0, y.shape[1] - 1, 0, 0], [-1, 1, -1, -1]).tile([1, py, 1, 1])], 1) as T4;
-    return y;
   }
   private crop(x: T4, h: number, w: number) { return x.slice([0, 0, 0, 0], [1, h, w, x.shape[3]]) as T4; }
   private expand(x: T4, h: number, w: number, identity: boolean) {
@@ -172,29 +166,7 @@ export class CoolChicTensorGraph {
     return this.crop(tf.image.resizeNearestNeighbor(x, [x.shape[1] * 2, x.shape[2] * 2], false), h, w);
   }
   private filter(x: T4, p: Parameter, kernel: number, up: boolean): T4 {
-    let full = this.transformed.get(p.key);
-    if (!full) {
-      const half = this.parameter(p);
-      full = tf.concat([half, half.slice([0], [Math.floor(kernel / 2)]).reverse()], 0);
-      this.transformed.set(p.key, full);
-    }
-    const c = x.shape[3];
-    if (!up) {
-      const horizontal = full.reshape([1, kernel, 1, 1]).tile([1, 1, c, 1]) as T4;
-      const vertical = full.reshape([kernel, 1, 1, 1]).tile([1, 1, c, 1]) as T4;
-      return tf.depthwiseConv2d(tf.depthwiseConv2d(x, horizontal, 1, 'same'), vertical, 1, 'same').add(x) as T4;
-    }
-    const diagonal = this.constant(`eye:${c}`, () => tf.eye(c));
-    const matrix = full.reshape([kernel, 1, 1]).mul(diagonal.reshape([1, c, c]));
-    const pad = kernel / 2, crop = 3 * pad - 1;
-    const paddedX = this.replicate(x, 0, pad);
-    const width = (paddedX.shape[2] - 1) * 2 + kernel;
-    const h = tf.conv2dTranspose(paddedX, matrix.reshape([1, kernel, c, c]) as T4, [1, x.shape[1], width, c], [1, 2], 'valid')
-      .slice([0, 0, crop, 0], [1, x.shape[1], x.shape[2] * 2, c]) as T4;
-    const paddedY = this.replicate(h, pad, 0);
-    const height = (paddedY.shape[1] - 1) * 2 + kernel;
-    return tf.conv2dTranspose(paddedY, matrix.reshape([kernel, 1, c, c]) as T4, [1, height, h.shape[2], c], [2, 1], 'valid')
-      .slice([0, crop, 0, 0], [1, x.shape[1] * 2, h.shape[2], c]) as T4;
+    return fusedFilter(x, this.parameter(p), kernel, up);
   }
   private resize(x: T4, h: number, w: number, mode: GraphArchitecture['interpolation']): T4 {
     if (x.shape[1] === h && x.shape[2] === w) return x;
@@ -227,64 +199,17 @@ export class CoolChicTensorGraph {
     return axis(axis(x, w, 2), h, 1);
   }
   private quantize(x: T4, noise: T4, options: GraphOptions): T4 {
-    const { mode, temperature } = options;
-    const normalizer = options.normalizer ?? Math.fround(Math.tanh(Math.fround(1 / Math.fround(2 * temperature))));
-    const pair = (value: tf.Tensor) => {
-      const floor = value.floor();
-      const t = value.sub(floor).sub(0.5).div(temperature).tanh();
-      return { value: floor.add(t.mul(0.5).div(normalizer)).add(0.5), derivative: tf.scalar(1).sub(t.square()).mul(0.5).div(Math.fround(temperature * normalizer)) };
-    };
-    const op = tf.customGrad<T4>((...args) => {
-      const input = args[0] as T4, save = args[1] as tf.GradSaveFunc;
-      if (mode === 0) return { value: input.add(noise) as T4, gradFunc: (dy: T4) => dy };
-      if (mode === 3 || mode === 4) return { value: input.round() as T4, gradFunc: () => tf.zerosLike(input) };
-      const first = pair(input);
-      const second = mode === 2 ? pair(first.value.add(noise)) : first;
-      save([mode === 2 ? second.derivative.mul(first.derivative) : first.derivative]);
-      return { value: second.value as T4, gradFunc: (dy: T4, saved: tf.Tensor[]) => dy.mul(saved[0]) as T4 };
-    });
-    return op(x);
+    return fusedQuantize(x, noise, options);
   }
   private rate(x: T4, raw: T4): T4 {
-    const calculate = (latent: T4, arm: T4) => {
-      const mu = arm.slice([0, 0, 0, 0], [-1, -1, -1, 1]);
-      const shifted = arm.slice([0, 0, 0, 1], [-1, -1, -1, 1]).sub(4);
-      const scale = shifted.clipByValue(-5, 5).exp();
-      const upper = latent.add(0.5).sub(mu), lower = latent.sub(0.5).sub(mu);
-      const cdf = (d: tf.Tensor) => tf.scalar(0.5).sub(d.sign().mul(d.abs().neg().div(scale).expm1()).mul(0.5));
-      return { upper, lower, scale, shifted, probability: cdf(upper).sub(cdf(lower)) };
-    };
-    const op = tf.customGrad<T4>((...args) => {
-      const latent = args[0] as T4, arm = args[1] as T4, save = args[2] as tf.GradSaveFunc;
-      const { probability } = calculate(latent, arm);
-      save([latent, arm]);
-      return { value: probability.maximum(2 ** -16).log().div(-Math.fround(Math.LN2)) as T4,
-        gradFunc: (dy: T4, saved: tf.Tensor[]) => {
-          const { upper, lower, scale, shifted, probability: p } = calculate(saved[0] as T4, saved[1] as T4);
-          const eu = upper.abs().neg().div(scale).exp(), el = lower.abs().neg().div(scale).exp();
-          const density = (d: tf.Tensor, e: tf.Tensor) => tf.where(d.equal(0), tf.zerosLike(d), e.div(scale.mul(2)));
-          const multiplier = tf.where(p.greaterEqual(2 ** -16), p.maximum(2 ** -16).mul(Math.fround(Math.LN2)).reciprocal().neg(), tf.zerosLike(p)).mul(dy);
-          const dx = density(upper, eu).sub(density(lower, el)).mul(multiplier);
-          const ds = upper.neg().mul(eu).add(lower.mul(el)).div(scale.mul(2).mul(scale)).mul(multiplier).mul(scale);
-          const logGradient = tf.where(shifted.greater(-5).logicalAnd(shifted.less(5)), ds, tf.zerosLike(ds));
-          return [dx as T4, tf.concat([dx.neg(), logGradient], 3) as T4];
-        } };
-    });
-    return op(x, raw);
+    return fusedRate(x, raw);
   }
   private forward(noise: Float32Array, options: GraphOptions) {
     const a = this.spec.architecture;
-    this.transformed.clear();
-    let offset = 0;
-    const quantized = this.latentVars.map((variable, i) => {
-      const { height: h, width: w } = this.spec.latents[i], size = h * w;
-      const sample = tf.tensor4d(new Float32Array(noise.subarray(offset, offset + size)), [1, h, w, 1]); offset += size;
-      return this.quantize(variable.mul(16) as T4, sample, options);
-    });
+    const quantized = this.latentVars.map((variable, i) => this.quantize(variable as T4, this.noiseVars[i] as T4, options));
     const rates = quantized.map((latent, index) => {
       const h = latent.shape[1], w = latent.shape[2];
-      const padded = tf.pad(latent, [[0, 0], [4, 4], [4, 4], [0, 0]]);
-      const contexts = this.spec.neighbours.map(([dy, dx]) => padded.slice([0, 4 + dy, 4 + dx, 0], [1, h, w, 1]));
+      const contexts = [fusedContext(latent, this.spec.neighbours)];
       if (a.ifce_outputs) {
         const network = this.ifce[index];
         let inter: T4;
@@ -321,10 +246,16 @@ export class CoolChicTensorGraph {
   }
   async gradient(parameters: Float32Array, latents: Float32Array, noise: Float32Array, options: GraphOptions, debug = false): Promise<Float32Array> {
     if (gpuFailure) throw new Error(gpuFailure);
+    if (this.running) throw new Error('Concurrent GPU gradient calls are not supported');
+    this.running = true;
     const device = (tf.backend() as WebGPUBackend).device;
     device.pushErrorScope('validation');
-    try { return await this.computeGradient(parameters, latents, noise, options, debug); }
-    finally {
+    try {
+      const result = await this.computeGradient(parameters, latents, noise, options, debug);
+      if (!result.every(Number.isFinite)) throw new Error('Non-finite GPU graph gradient');
+      return result;
+    } finally {
+      this.running = false;
       const error = await device.popErrorScope();
       if (error) throw new Error(error.message);
       if (gpuFailure) throw new Error(gpuFailure);
@@ -332,13 +263,22 @@ export class CoolChicTensorGraph {
   }
   private async computeGradient(parameters: Float32Array, latents: Float32Array, noise: Float32Array, options: GraphOptions, debug: boolean): Promise<Float32Array> {
     if (parameters.length !== this.parameterCount || latents.length !== this.latentCount || noise.length !== this.latentCount) throw new Error('Tensor graph payload length mismatch');
+    const key = JSON.stringify([options.mode, options.temperature, options.normalizer, options.lambda]);
+    if (!debug && this.plan?.key === key) return this.plan.graph.run(parameters, latents, noise);
+    if (!debug) { this.plan?.graph.dispose(); this.plan = undefined; }
     tf.tidy(() => {
       const offsets = [0]; for (const n of this.spec.group_lengths) offsets.push(offsets[offsets.length - 1] + n);
       for (const p of this.refs) this.parameter(p).assign(tf.tensor1d(new Float32Array(parameters.subarray(offsets[p.group] + p.offset, offsets[p.group] + p.offset + p.length))));
       let offset = 0;
-      for (const variable of this.latentVars) { const n = variable.size; variable.assign(tf.tensor(new Float32Array(latents.subarray(offset, offset + n)), variable.shape)); offset += n; }
+      for (let i = 0; i < this.latentVars.length; i++) {
+        const variable = this.latentVars[i], n = variable.size;
+        variable.assign(tf.tensor(new Float32Array(latents.subarray(offset, offset + n)), variable.shape));
+        this.noiseVars[i].assign(tf.tensor(new Float32Array(noise.subarray(offset, offset + n)), variable.shape));
+        offset += n;
+      }
     });
-    const packed = tf.tidy(() => {
+    this.debugParameterGradients = debug;
+    const build = () => tf.tidy(() => {
       const trainable = [...this.refs.filter(p => debug ? p.group !== 5 : p.trainable).map(p => this.parameter(p)), ...this.latentVars];
       const { grads } = tf.variableGrads(() => this.forward(noise, options).loss, trainable);
       const tensors = [...this.refs.map(p => grads[this.parameter(p).name]?.reshape([-1]) ?? tf.zeros([p.length])), ...this.latentVars.map(v => grads[v.name].reshape([-1]))];
@@ -348,16 +288,37 @@ export class CoolChicTensorGraph {
       }
       return tf.concat(tensors) as tf.Tensor1D;
     });
+    let packed: tf.Tensor1D;
+    if (debug) packed = build();
+    else {
+      const backend = tf.backend() as WebGPUBackend;
+      const inputs: GraphInputBuffer[] = [];
+      const prepare = (tensor: tf.Tensor, kind: GraphInputBuffer['kind'], offset: number) => {
+        (backend as unknown as { uploadToGPU(id: object): void }).uploadToGPU(tensor.dataId);
+        const resource = backend.tensorMap.get(tensor.dataId).resource as GPUBuffer;
+        inputs.push({ kind, offset, length: tensor.size, buffer: resource });
+      };
+      const offsets = [0]; for (const n of this.spec.group_lengths) offsets.push(offsets[offsets.length - 1] + n);
+      for (const p of this.refs) prepare(this.parameter(p), 'parameters', offsets[p.group] + p.offset);
+      let offset = 0;
+      for (let i = 0; i < this.latentVars.length; i++) {
+        prepare(this.latentVars[i], 'latents', offset); prepare(this.noiseVars[i], 'noise', offset); offset += this.latentVars[i].size;
+      }
+      const capture = this.recorder.capture(build);
+      packed = capture.value;
+      const output = backend.tensorMap.get(packed.dataId).resource as GPUBuffer;
+      this.plan = { key, graph: new CapturedTensorGradient(backend.device, capture.batches, output, packed.size, inputs, capture.release) };
+    }
     try {
       const result = await packed.data() as Float32Array;
-      if (!result.every(Number.isFinite)) throw new Error('Non-finite GPU graph gradient');
       if ((tf.backend() as WebGPUBackend).memory().numBytesAllocatedInGPU > 1536 * 1024 ** 2) throw new Error('Tensor graph exceeded GPU memory budget');
       return result;
-    } finally { packed.dispose(); this.transformed.clear(); }
+    } finally { packed.dispose(); }
   }
   dispose() {
     for (const variable of this.vars.values()) variable.dispose(); this.vars.clear();
-    this.latentVars?.forEach(v => v.dispose()); this.target?.dispose(); this.common?.dispose();
+    this.latentVars?.forEach(v => v.dispose()); this.noiseVars?.forEach(v => v.dispose()); this.target?.dispose(); this.common?.dispose();
     for (const tensor of this.constants.values()) tensor.dispose(); this.constants.clear();
+    this.plan?.graph.dispose(); this.plan = undefined; this.recorder?.dispose();
   }
 }

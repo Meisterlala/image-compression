@@ -375,7 +375,7 @@ impl Network {
         if (target.channels, target.height, target.width) != (3, arch.height, arch.width)
             || !lambda.is_finite()
             || lambda <= 0.0
-            || noise.len() != self.latents.iter().map(|l| l.data.len()).sum()
+            || noise.len() != self.latents.iter().map(|l| l.data.len()).sum::<usize>()
         {
             return Err(Error("Invalid reference training input"));
         }
