@@ -1,7 +1,7 @@
-//! Reference-v5 neural operators and derivatives, under construction.
+//! Reference-v5 RGB intra MSE training, neural operators and bitstream I/O.
 //!
-//! This is NOT yet the application's encoder/decoder. The legacy reduced codec
-//! stays separate until reference bitstream and complete training parity pass.
+//! This is the application's Cool-chic path. The former reduced encoder has
+//! been removed; historical reduced-profile files remain decodable.
 //! Ported from Orange Cool-Chic v5.0.0 (BSD-3-Clause); see UPSTREAM-LICENSE.txt.
 
 pub mod architecture;

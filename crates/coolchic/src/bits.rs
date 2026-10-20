@@ -60,9 +60,7 @@ impl<'a> Reader<'a> {
     }
     pub fn expect(&mut self, value: u32, n: usize) -> Result<()> {
         if self.get(n)? != value {
-            return Err(Error(
-                "Unsupported Cool-chic profile (only the experimental Rust RGB image profile is supported)",
-            ));
+            return Err(Error("Unsupported Cool-chic RGB still-image stream"));
         }
         Ok(())
     }

@@ -82,7 +82,7 @@ fn run(
         }
         let width = specs[index].width;
         let height = specs[index].height;
-        crate::entropy::visit(width, height, |x, y| {
+        crate::wavefront::visit(width, height, |x, y| {
             for (c, &(dy, dx)) in offsets.iter().enumerate() {
                 let iy = y as isize + dy;
                 let ix = x as isize + dx;

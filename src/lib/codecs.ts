@@ -5,7 +5,7 @@ import type { Format, Settings } from '../types';
 export async function loadCodec(format: Exclude<Format, 'jpegai'>, s: Settings, progress: (text: string) => void = () => {}) {
   if (format === 'coolchic') {
     const { loadCoolChic } = await import('./coolchic');
-    return loadCoolChic(s.quality, s.effort, progress);
+    return loadCoolChic(s, progress);
   }
   if (format === 'jpeg') {
     const [{ default: factory }, { defaultOptions }, { default: decode, init: initDecoder }] = await Promise.all([

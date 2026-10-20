@@ -56,7 +56,7 @@ function selectModel(operatingPoint: OperatingPoint, id: number) {
     <p v-else-if="result && working" class="changed-note">Showing the previous result while this job runs.</p>
     <div class="output-actions" :class="{ 'no-output': !result }">
       <div v-if="status.phase === 'confirming'" class="memory-warning" role="alert">
-        <strong>Large JPEG AI encode</strong>
+        <strong>Large {{ format.label }} encode</strong>
         <p>Estimated working memory: {{ ((status.confirmationBytes ?? 0) / 1073741824).toFixed(2) }} GiB. This may be slow or cause the browser to run out of memory.</p>
         <div class="warning-actions">
           <button class="encode-button" @click="emit('confirm')">Continue encoding</button>

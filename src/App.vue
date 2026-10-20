@@ -105,7 +105,7 @@ async function loadFile(chosen: File, resizing = false) {
     <header id="original-image" class="page-header" tabindex="-1">
       <div class="intro">
         <h1>Image compression</h1>
-        <p>Compare JPEG AI, JPEG, AVIF, JPEG XL and experimental Cool-chic on your own image. Adjust compression and compare image quality, file size, and encoding and decoding times.</p>
+        <p>Compare JPEG AI, JPEG, AVIF, JPEG XL and Cool-chic 5.0 on your own image. Adjust compression and compare image quality, file size, and encoding and decoding times.</p>
       </div>
       <ImageInput
         v-model:size="downscaleSize"
@@ -204,7 +204,7 @@ h1 {
 
 .codec-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin: 20px 0 12px;
   border-bottom: 1px solid var(--line);
 }
@@ -246,6 +246,8 @@ h1 {
 }
 
 @media (max-width: 720px) {
+  .codec-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
   .app-shell {
     padding: 0 14px 20px;
   }

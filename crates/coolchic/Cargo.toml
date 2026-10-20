@@ -1,9 +1,9 @@
 [package]
 name = "coolchic"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "AGPL-3.0-only"
-description = "CPU-only experimental Cool-chic 5.0 image profile"
+description = "Browser-portable Cool-chic v5 reference RGB codec and intra MSE trainer"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

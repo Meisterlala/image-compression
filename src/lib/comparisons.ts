@@ -76,7 +76,7 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>, refere
     if (active?.format !== format || status[format].phase !== 'confirming') return;
     status[format].phase = 'running';
     status[format].confirmationBytes = null;
-    status[format].message = 'Loading JPEG AI models…';
+    status[format].message = format === 'coolchic' ? 'Starting Cool-chic reference training…' : 'Loading JPEG AI models…';
     active.job.confirm();
   }
 

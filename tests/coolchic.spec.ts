@@ -28,10 +28,15 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   const pane = await open(page);
   await expect(pane.locator('.pane-settings .hint')).toHaveCount(0);
   await expect(pane.getByRole('slider')).toHaveCount(2);
+  await expect(pane.getByRole('radiogroup', { name: 'Compression preset' }).getByRole('radio')).toHaveCount(4);
+  await expect(pane.getByRole('radio', { name: 'LOP', exact: true })).toBeChecked();
+  await expect(pane.getByLabel('Training iterations', { exact: true })).toHaveAttribute('aria-valuetext', '2000 iterations');
+  await expect(pane.getByLabel('Quality', { exact: true })).toHaveAttribute('aria-valuetext', '40 out of 100');
   await expect(pane.getByRole('checkbox')).toHaveCount(0);
   await expect(pane.locator('.model-card')).toHaveCount(0);
   await upload(page);
   await pane.getByRole('button', { name: 'Encode', exact: true }).click();
+  await expect(pane).toHaveAttribute('data-phase', /done|error/, { timeout: 150000 });
   await expect(pane).toHaveAttribute('data-phase', 'done');
   await expect(pane.getByRole('alert')).toHaveCount(0);
   const row = page.locator('[data-result-format="coolchic"]');
@@ -41,7 +46,7 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   const download = page.waitForEvent('download');
   await pane.getByRole('button', { name: 'Download Cool-chic 5.0', exact: true }).click();
   const file = await download;
-  expect(file.suggestedFilename()).toMatch(/\.cool$/);
+  expect(file.suggestedFilename()).toMatch(/-lop-96x64\.cool$/);
   const encodedPath = info.outputPath('output.cool');
   const rgbaPath = info.outputPath('decoded.rgba');
   await file.saveAs(encodedPath);
@@ -61,9 +66,47 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   expect(requests.some(url => url.endsWith('.zjb'))).toBeFalsy();
   expect(requests.every(url => new URL(url).origin === new URL(page.url()).origin)).toBeTruthy();
   expect(requests.some(url => /coolchic_bg.*\.wasm/.test(url))).toBeTruthy();
+  const goldenCases = ['lop', 'mop', 'hop', 'vhop', 'common', 'resize', 'linear'].map(name => ({
+    name,
+    encoded: Array.from(readFileSync(`crates/coolchic/tests/fixtures/full-reference/${name}.cool`)),
+    expected: Array.from(readFileSync(`crates/coolchic/tests/fixtures/full-reference/${name}.rgba`)),
+  }));
+  // Decode official golden streams in browser WASM too, including common-noise
+  // math and all network architectures (not only the native interoperability path).
+  const goldenPixels = await page.evaluate(async ({ urls, cases }) => {
+    let bindings;
+    for (const url of urls) {
+      const module = await import(url);
+      if ('decodeCoolChic' in module) { bindings = module; break; }
+    }
+    if (!bindings) throw new Error('Cool-chic WASM bindings were not loaded');
+    await bindings.default();
+    return cases.map(item => {
+      const image = bindings.decodeCoolChic(new Uint8Array(item.encoded));
+      try { return { name: item.name, pixels: Array.from(image.rgba()) }; }
+      finally { image.free(); }
+    });
+  }, { urls: requests.filter(url => /\/coolchic-[^/]+\.js$/.test(url)), cases: goldenCases });
+  goldenPixels.forEach((actual, index) => expect(actual.pixels, actual.name).toEqual(goldenCases[index]!.expected));
   await page.getByRole('tab', { name: 'JPEG', exact: true }).click();
   await page.getByRole('tab', { name: 'Cool-chic 5.0', exact: true }).click();
   await expect(pane.getByRole('button', { name: 'Download Cool-chic 5.0', exact: true })).toBeVisible();
+  await pane.getByRole('radio', { name: 'MOP', exact: true }).check();
+  await pane.getByLabel('Quality', { exact: true }).fill('20');
+  await pane.getByLabel('Training iterations', { exact: true }).fill('18');
+  await expect(page.locator('[data-persistence]')).toContainText('Saved locally');
+  await page.reload();
+  await expect(pane).toHaveAttribute('data-phase', 'done');
+  await expect(pane.getByRole('radio', { name: 'MOP', exact: true })).toBeChecked();
+  await expect(pane.getByLabel('Quality', { exact: true })).toHaveAttribute('aria-valuetext', '20 out of 100');
+  await expect(pane.getByLabel('Training iterations', { exact: true })).toHaveAttribute('aria-valuetext', '4000 iterations');
+  const restored = page.waitForEvent('download');
+  await pane.getByRole('button', { name: 'Download Cool-chic 5.0', exact: true }).click();
+  const restoredFile = await restored;
+  expect(restoredFile.suggestedFilename()).toContain('-lop-'); // Saved result, not changed controls.
+  const stream = await restoredFile.createReadStream();
+  const chunks: Buffer[] = []; for await (const chunk of stream!) chunks.push(chunk);
+  expect(Buffer.concat(chunks)).toEqual(encoded);
 });
 
 test('Cool-chic rejects oversize input explicitly instead of silently resizing', async ({ page }) => {
@@ -82,9 +125,9 @@ test('Cool-chic rejects oversize input explicitly instead of silently resizing',
 test('Cool-chic reports training progress and cancellation leaves other codecs usable', async ({ page }) => {
   const pane = await open(page);
   await upload(page, 768, 512);
-  await pane.getByLabel('Training effort', { exact: false }).fill('9');
+  await pane.getByLabel('Training iterations', { exact: true }).fill('100');
   await pane.getByRole('button', { name: 'Encode', exact: true }).click();
-  await expect(pane.locator('.pane-status')).toContainText('Training Cool-chic');
+  await expect(pane.locator('.pane-status')).toContainText('Training Cool-chic', { timeout: 60000 });
   await pane.getByRole('button', { name: 'Cancel encoding', exact: true }).click();
   await expect(pane).toHaveAttribute('data-phase', 'cancelled');
   await expect(pane.getByRole('button', { name: 'Download Cool-chic 5.0', exact: true })).toHaveCount(0);
@@ -94,9 +137,66 @@ test('Cool-chic reports training progress and cancellation leaves other codecs u
   await expect(jpeg).toHaveAttribute('data-phase', 'done');
 });
 
+test('Cool-chic rejects a reference training job above its memory budget', async ({ page }) => {
+  const pane = await open(page);
+  await pane.getByRole('radio', { name: 'HOP', exact: true }).check();
+  await upload(page, 2000, 2000); // Within the hard pixel cap, but too large for HOP training.
+  await pane.getByRole('button', { name: 'Encode', exact: true }).click();
+  await expect(pane).toHaveAttribute('data-phase', 'error');
+  await expect(pane.getByRole('alert')).toContainText('3 GiB');
+  await expect(pane.getByRole('alert')).toContainText('Downscale image');
+});
+
+test('Cool-chic asks before a large reference job and can cancel before training', async ({ page }) => {
+  const pane = await open(page);
+  await pane.getByRole('radio', { name: 'HOP', exact: true }).check();
+  await upload(page, 1280, 1024);
+  await pane.getByRole('button', { name: 'Encode', exact: true }).click();
+  await expect(pane).toHaveAttribute('data-phase', 'confirming');
+  await expect(pane.getByRole('alert')).toContainText('Large Cool-chic 5.0 encode');
+  await pane.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(pane).toHaveAttribute('data-phase', 'cancelled');
+});
+
+test('Cool-chic segmented choices, intuitive sliders and practical tooltips are usable', async ({ page }) => {
+  const pane = await open(page);
+  const highest = pane.getByRole('radio', { name: 'VHOP', exact: true });
+  await highest.check();
+  await expect(highest).toBeChecked();
+  await expect.poll(() => pane.locator('.point-options').evaluate(track => {
+    const box = track.getBoundingClientRect();
+    const pill = getComputedStyle(track, '::before');
+    const selected = track.querySelector('input:checked')!.getBoundingClientRect();
+    const x = box.left + parseFloat(getComputedStyle(track).borderLeftWidth) + parseFloat(pill.left) + new DOMMatrix(pill.transform).m41;
+    return Math.max(Math.abs(x - selected.left), Math.abs(parseFloat(pill.width) - selected.width));
+  })).toBeLessThan(0.5);
+  await expect(pane.locator('.control-description')).toContainText('takes the longest');
+  await highest.press('ArrowLeft');
+  await expect(pane.getByRole('radio', { name: 'HOP', exact: true })).toBeChecked();
+  await pane.getByRole('button', { name: 'About Compression preset', exact: true }).focus();
+  await expect(page.getByRole('tooltip')).toContainText('fastest');
+  await expect(page.getByRole('tooltip')).toContainText('memory');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  const quality = pane.getByRole('slider', { name: 'Quality', exact: true });
+  await quality.fill('0'); await expect(quality).toHaveAttribute('aria-valuetext', '0 out of 100');
+  await quality.fill('100'); await expect(quality).toHaveAttribute('aria-valuetext', '100 out of 100');
+  const iterations = pane.getByRole('slider', { name: 'Training iterations', exact: true });
+  await iterations.fill('100'); await expect(iterations).toHaveAttribute('aria-valuetext', '100000 iterations');
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const label of ['Quality', 'Training iterations']) {
+    await pane.getByRole('button', { name: `About ${label}`, exact: true }).click();
+    await expect(page.getByRole('tooltip')).toBeInViewport();
+    await page.keyboard.press('Escape');
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
 test('Cool-chic controls and five-tab layout fit a narrow viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const pane = await open(page);
-  await expect(pane.getByLabel('Training effort', { exact: false })).toBeVisible();
+  await expect(pane.getByLabel('Training iterations', { exact: true })).toBeVisible();
+  await expect(pane.getByRole('radiogroup', { name: 'Compression preset' })).toBeVisible();
+  await expect(pane.getByLabel('Quality', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });

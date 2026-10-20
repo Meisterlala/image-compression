@@ -7,7 +7,8 @@ function saveCompressed() {
   const result = props.result;
   const format = formats.find(format => format.id === result.settings.format)!;
   const name = props.file?.name.replace(/\.[^.]+$/, '') ?? 'image';
-  const point = result.settings.format === 'jpegai' ? `-${result.settings.operatingPoint}` : '';
+  const point = result.settings.format === 'jpegai' ? `-${result.settings.operatingPoint}`
+    : result.settings.format === 'coolchic' && result.settings.coolchicPoint ? `-${result.settings.coolchicPoint}` : '';
   download(new Blob([result.encoded], { type: format.mime }), `${name}${point}-${result.width}x${result.height}.${format.extension}`);
 }
 function saveLosslessPng() {

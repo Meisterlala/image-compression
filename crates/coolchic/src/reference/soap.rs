@@ -182,17 +182,27 @@ impl Soap {
                 let magnitude = matrix.amax();
                 matrix /= magnitude;
                 let primary = SymmetricEigen::try_new(matrix.clone(), f32::EPSILON, 10_000);
-                let (values, vectors) = if let Some(eig) = primary.filter(|e|
-                    e.eigenvalues.iter().chain(e.eigenvectors.iter()).all(|v| v.is_finite())) {
+                let (values, vectors) = if let Some(eig) = primary.filter(|e| {
+                    e.eigenvalues
+                        .iter()
+                        .chain(e.eigenvectors.iter())
+                        .all(|v| v.is_finite())
+                }) {
                     (eig.eigenvalues, eig.eigenvectors)
                 } else {
                     // Match the reference's double-precision fallback when
                     // f32 decomposition fails on a singular/tiny covariance.
-                    let eig = SymmetricEigen::try_new(matrix.cast::<f64>(), f32::EPSILON as f64, 10_000)
-                        .ok_or(Error("Reference SOAP eigendecomposition did not converge"))?;
-                    (eig.eigenvalues.cast::<f32>(), eig.eigenvectors.cast::<f32>())
+                    let eig =
+                        SymmetricEigen::try_new(matrix.cast::<f64>(), f32::EPSILON as f64, 10_000)
+                            .ok_or(Error("Reference SOAP eigendecomposition did not converge"))?;
+                    (
+                        eig.eigenvalues.cast::<f32>(),
+                        eig.eigenvectors.cast::<f32>(),
+                    )
                 };
-                if vectors.iter().any(|v| !v.is_finite()) { return Err(Error("Non-finite reference SOAP eigenbasis")); }
+                if vectors.iter().any(|v| !v.is_finite()) {
+                    return Err(Error("Non-finite reference SOAP eigenbasis"));
+                }
                 let mut order: Vec<usize> = (0..gram.nrows()).collect();
                 order.sort_by(|&a, &b| values[b].total_cmp(&values[a]).then(b.cmp(&a)));
                 let mut basis = DMatrix::zeros(gram.nrows(), gram.nrows());

@@ -68,7 +68,20 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
     } else {
       progress(`Loading ${s.format.toUpperCase()} encoder and decoder…`);
       const codec = await loadCodec(s.format, s, progress);
-      startupMs = performance.now() - start;
+      if ('estimateMemory' in codec) {
+        estimatedMemory = codec.estimateMemory(width, height);
+        if (estimatedMemory > 3 * 1024 ** 3) throw new Error('Cool-chic reference training exceeds the 3 GiB browser memory budget. Choose a smaller Downscale image size or a lighter operating point.');
+        if (estimatedMemory > JPEG_AI_CONFIRM_THRESHOLD) {
+          const memoryBytes = estimatedMemory;
+          const waiting = performance.now();
+          await new Promise<void>(resolve => {
+            resume = resolve;
+            self.postMessage({ type: 'confirmation-required', memoryBytes } satisfies WorkerMessage);
+          });
+          confirmationWaitMs = performance.now() - waiting;
+        }
+      }
+      startupMs = performance.now() - start - confirmationWaitMs;
       progress(`Encoding ${s.format.toUpperCase()} locally…`);
       let tick = performance.now();
       encoded = await codec.encode(new ImageData(pixels, width, height));
