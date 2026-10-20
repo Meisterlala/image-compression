@@ -48,6 +48,8 @@ type Encode = (encoder: GPUCommandEncoder) => void;
 interface Batch { commands: Encode[] }
 export interface GraphInputBuffer { kind: 'parameters' | 'latents' | 'noise'; offset: number; length: number; buffer: GPUBuffer }
 
+let uploadingCpuTensor = false;
+
 /** CPU tensor uploads do not need persistent mapped/staging buffers. Keeping
  * those buffers in a replay plan can exhaust a browser's host-visible heap even
  * when the card still has plenty of device-local VRAM. */
@@ -59,8 +61,11 @@ export function useQueueTensorUploads(backend: WebGPUBackend) {
     const values = tensor.dtype === 'float32'
       ? new Float32Array(tensor.values as ArrayLike<number>)
       : new Int32Array(tensor.values as ArrayLike<number>);
-    const resource = backend.bufferManager.acquireBuffer(values.byteLength,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC|GPUBufferUsage.COPY_DST,false,false);
-    backend.device.queue.writeBuffer(resource,0,values);
+    let resource: GPUBuffer;
+    uploadingCpuTensor = true;
+    try { resource = backend.bufferManager.acquireBuffer(values.byteLength,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC|GPUBufferUsage.COPY_DST); }
+    finally { uploadingCpuTensor = false; }
+    uploadGpuBuffer(backend.device,resource,values);
     Object.assign(tensor,{resource,values:null});
   };
 }
@@ -84,7 +89,7 @@ export class TensorReplay {
     this.acquire = manager.acquireBuffer; this.release = manager.releaseBuffer;
     manager.acquireBuffer = (...args) => {
       const [size,usage,mapped,reuse] = args;
-      const immutable = mapped || reuse === false || !!(usage & GPUBufferUsage.UNIFORM);
+      const immutable = uploadingCpuTensor || mapped || reuse === false || !!(usage & GPUBufferUsage.UNIFORM);
       const free = !immutable ? this.available?.get(`${size}:${usage}`) : undefined;
       if (free?.length) {
         const buffer = free.pop()!;
@@ -179,7 +184,7 @@ export class TensorReplay {
       for (const buffer of array) {
         const commands = recorded.get(buffer);
         if (!commands) throw new Error('GPU capture encountered an external command buffer');
-        batches.push({ commands });
+        if (commands.length) batches.push({ commands });
       }
       originalSubmit.call(queue, array);
     };
