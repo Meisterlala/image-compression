@@ -18,6 +18,9 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
   try {
     const { width, height, pixels, settings: s } = job;
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width * height > MAX_PIXELS || pixels.length !== width * height * 4) throw new Error('Image must contain between 1 and 40 million pixels.');
+    if (s.format === 'coolchic' && (width * height > 4_000_000 || width >= 16384 || height >= 16384)) {
+      throw new Error('Cool-chic supports up to 4 million pixels and dimensions below 16384. Choose a smaller Downscale image size.');
+    }
     progress('Loading local WASM runtime…');
     const start = performance.now();
     await init();
@@ -65,7 +68,6 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
     } else {
       progress(`Loading ${s.format.toUpperCase()} encoder and decoder…`);
       const codec = await loadCodec(s.format, s, progress);
-      if (s.format === 'coolchic') notices.push('Experimental reduced Cool-chic 5.0 encoder, not the full reference encoder or its presets. Fine colour detail is limited; quality 100 is not lossless. Compression performance differs from the reference presets.');
       startupMs = performance.now() - start;
       progress(`Encoding ${s.format.toUpperCase()} locally…`);
       let tick = performance.now();

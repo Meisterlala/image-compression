@@ -40,7 +40,6 @@ const id = (field: string) => `${settings.value.format}-${field}`;
       </div>
     </template>
     <template v-else-if="settings.format === 'coolchic'">
-      <p class="hint full-width">Experimental reduced encoder, not the full Cool-chic reference encoder or its presets. Runs locally on your CPU. Fine colour detail is limited; quality 100 is not lossless. Maximum 4 million pixels.</p>
       <div class="field">
         <label :for="id('quality')">Quality <output>{{ settings.quality }}</output></label>
         <input :id="id('quality')" v-model.number="settings.quality" type="range" min="1" max="100">
