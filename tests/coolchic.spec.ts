@@ -28,7 +28,7 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   const pane = await open(page);
   await expect(pane.locator('.pane-settings .hint')).toHaveCount(0);
   await expect(pane.getByRole('slider')).toHaveCount(2);
-  await expect(pane.getByRole('radiogroup', { name: 'Compression preset' }).getByRole('radio')).toHaveCount(4);
+  await expect(pane.getByRole('radiogroup', { name: 'Operating point' }).getByRole('radio')).toHaveCount(4);
   await expect(pane.getByRole('radio', { name: 'LOP', exact: true })).toBeChecked();
   await expect(pane.getByLabel('Training iterations', { exact: true })).toHaveAttribute('aria-valuetext', '2000 iterations');
   await expect(pane.getByLabel('Rate constraint (λ)', { exact: true })).toHaveAttribute('aria-valuetext', '0.001');
@@ -160,6 +160,10 @@ test('Cool-chic asks before a large reference job and can cancel before training
 
 test('Cool-chic segmented choices, intuitive sliders and practical tooltips are usable', async ({ page }) => {
   const pane = await open(page);
+  for (const [point, fullName] of [['LOP', 'Low Operating Point'], ['MOP', 'Medium Operating Point'], ['HOP', 'High Operating Point'], ['VHOP', 'Very High Operating Point']]) {
+    await pane.getByRole('radio', { name: point, exact: true }).check();
+    await expect(pane.locator('.control-description')).toContainText(fullName!);
+  }
   const highest = pane.getByRole('radio', { name: 'VHOP', exact: true });
   await highest.check();
   await expect(highest).toBeChecked();
@@ -173,7 +177,7 @@ test('Cool-chic segmented choices, intuitive sliders and practical tooltips are 
   await expect(pane.locator('.control-description')).toContainText('takes the longest');
   await highest.press('ArrowLeft');
   await expect(pane.getByRole('radio', { name: 'HOP', exact: true })).toBeChecked();
-  await pane.getByRole('button', { name: 'About Compression preset', exact: true }).focus();
+  await pane.getByRole('button', { name: 'About Operating point', exact: true }).focus();
   await expect(page.getByRole('tooltip')).toContainText('fastest');
   await expect(page.getByRole('tooltip')).toContainText('memory');
   await page.keyboard.press('Escape');
@@ -201,7 +205,7 @@ test('Cool-chic controls and five-tab layout fit a narrow viewport', async ({ pa
   await page.setViewportSize({ width: 390, height: 844 });
   const pane = await open(page);
   await expect(pane.getByLabel('Training iterations', { exact: true })).toBeVisible();
-  await expect(pane.getByRole('radiogroup', { name: 'Compression preset' })).toBeVisible();
+  await expect(pane.getByRole('radiogroup', { name: 'Operating point' })).toBeVisible();
   await expect(pane.getByLabel('Rate constraint (λ)', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });

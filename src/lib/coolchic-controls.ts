@@ -1,9 +1,9 @@
 export const coolchicPoints = ['lop', 'mop', 'hop', 'vhop'] as const;
 export const coolchicPointDescriptions = [
-  'Fastest encoding and decoding, with the lowest memory use.',
-  'Uses more time and memory to try to reduce the file size.',
-  'Slower encoding and decoding, with potential file-size savings.',
-  'Highest effort and memory use. May make smaller files, but takes the longest.',
+  'Low Operating Point — fastest encoding and decoding, with the lowest memory use.',
+  'Medium Operating Point — uses more time and memory to try to reduce the file size.',
+  'High Operating Point — slower encoding and decoding, with potential file-size savings.',
+  'Very High Operating Point — highest effort and memory use. May make smaller files, but takes the longest.',
 ] as const;
 export const coolchicRateMin = 0.000001;
 export const coolchicRateMax = 0.1;

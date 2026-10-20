@@ -53,8 +53,8 @@ const gpuDecode = computed({
       </div>
       <div class="field coolchic-point-field">
         <div class="control-heading">
-          <span :id="id('complexity-label')">Compression preset</span>
-          <MetricTooltip label="Compression preset" text="LOP is the fastest and uses the least memory. MOP, HOP and VHOP spend progressively more time and memory trying to improve compression. They can also take longer to decode. A higher preset does not guarantee a smaller file or a better image." />
+          <span :id="id('complexity-label')">Operating point</span>
+          <MetricTooltip label="Operating point" text="LOP is the fastest and uses the least memory. MOP, HOP and VHOP spend progressively more time and memory trying to improve compression. They can also take longer to decode. A higher preset does not guarantee a smaller file or a better image." />
         </div>
         <p :id="id('complexity-description')" class="control-description" aria-live="polite">{{ coolchicPointDescriptions[coolchicPoint] }}</p>
         <div class="point-options" role="radiogroup" :aria-labelledby="id('complexity-label')" :aria-describedby="id('complexity-description')" :style="{ '--point-index': coolchicPoint }">
