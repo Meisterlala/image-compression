@@ -33,8 +33,10 @@ and exact adjoints. Padding, causal contexts, hyperlatents, common randomness,
 quantization, probability floors and clipping derivatives follow the reference.
 Frozen parameter groups stay frozen; fixture checks can request raw derivatives.
 
-`coolchic-tensor-replay.ts` records differentiated command plans and pins their
-buffers for reuse. Later iterations update inputs and replay pipelines/bind
+`coolchic-tensor-replay.ts` records differentiated command plans. Dead storage
+intermediates are recycled within each capture, then reserved for that plan;
+uniforms and host-written constants remain immutable. CPU tensors upload through
+`queue.writeBuffer`, without retaining mapped upload buffers in the replay. Later iterations update inputs and replay pipelines/bind
 groups without rebuilding the autodiff graph. Optimizer commands are cached too;
 noise and learning-rate data upload once per batch, and complete iterations share
 a command encoder until a SOAP basis refresh or batch boundary. Training and evaluation plans are

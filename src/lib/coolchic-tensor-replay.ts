@@ -4,6 +4,23 @@ type Encode = (encoder: GPUCommandEncoder) => void;
 interface Batch { commands: Encode[] }
 export interface GraphInputBuffer { kind: 'parameters' | 'latents' | 'noise'; offset: number; length: number; buffer: GPUBuffer }
 
+/** CPU tensor uploads do not need persistent mapped/staging buffers. Keeping
+ * those buffers in a replay plan can exhaust a browser's host-visible heap even
+ * when the card still has plenty of device-local VRAM. */
+export function useQueueTensorUploads(backend: WebGPUBackend) {
+  const original = backend.uploadToGPU.bind(backend);
+  backend.uploadToGPU = dataId => {
+    const tensor = backend.tensorMap.get(dataId);
+    if (tensor.resource || !tensor.values || !['float32','int32','bool'].includes(tensor.dtype)) return original(dataId);
+    const values = tensor.dtype === 'float32'
+      ? new Float32Array(tensor.values as ArrayLike<number>)
+      : new Int32Array(tensor.values as ArrayLike<number>);
+    const resource = backend.bufferManager.acquireBuffer(values.byteLength,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC|GPUBufferUsage.COPY_DST,false,false);
+    backend.device.queue.writeBuffer(resource,0,values);
+    Object.assign(tensor,{resource,values:null});
+  };
+}
+
 /** Record the already differentiated GPU program once. Re-encode its fixed
  * pipelines/bind groups directly thereafter; no TensorFlow tensor allocation,
  * autodiff traversal or bind-group rebuilding on the iteration hot path. */
@@ -11,6 +28,9 @@ export class TensorReplay {
   private pins = new Map<GPUBuffer, number>();
   private deferred = new Map<GPUBuffer, boolean | undefined>();
   private collecting?: Set<GPUBuffer>;
+  private available?: Map<string,GPUBuffer[]>;
+  private availableSet?: Set<GPUBuffer>;
+  private immutable = new WeakSet<GPUBuffer>();
   private acquire: WebGPUBackend['bufferManager']['acquireBuffer'];
   private release: WebGPUBackend['bufferManager']['releaseBuffer'];
   // Bind groups retain these buffers: do not recycle intermediates/uniforms
@@ -18,10 +38,32 @@ export class TensorReplay {
   constructor(private backend: WebGPUBackend) {
     const manager = backend.bufferManager;
     this.acquire = manager.acquireBuffer; this.release = manager.releaseBuffer;
-    manager.acquireBuffer = (...args) => { const buffer = this.acquire.apply(manager, args); this.pin(buffer); return buffer; };
-    manager.releaseBuffer = (buffer, reuse) => {
-      if (this.pins.has(buffer)) this.deferred.set(buffer, reuse);
-      else this.release.call(manager, buffer, reuse);
+    manager.acquireBuffer = (...args) => {
+      const [size,usage,mapped,reuse] = args;
+      const immutable = mapped || reuse === false || !!(usage & GPUBufferUsage.UNIFORM);
+      const free = !immutable ? this.available?.get(`${size}:${usage}`) : undefined;
+      if (free?.length) {
+        const buffer = free.pop()!;
+        this.availableSet!.delete(buffer); this.deferred.delete(buffer);
+        return buffer;
+      }
+      const buffer = this.acquire.apply(manager,args);
+      if (immutable) this.immutable.add(buffer); else this.immutable.delete(buffer);
+      this.pin(buffer); return buffer;
+    };
+    manager.releaseBuffer = (buffer,reuse) => {
+      if (this.pins.has(buffer)) {
+        this.deferred.set(buffer,reuse);
+        // Recycle dead intermediates inside this command plan, but never let
+        // another plan steal them. Uniforms/host-written constants must retain
+        // their original contents, since host writes are not replayed.
+        if (reuse !== false && this.collecting?.has(buffer) && this.pins.get(buffer) === 1 && !this.immutable.has(buffer) && !this.availableSet!.has(buffer)) {
+          const key = `${buffer.size}:${buffer.usage}`;
+          let free = this.available!.get(key);
+          if (!free) {free=[];this.available!.set(key,free);}
+          free.push(buffer); this.availableSet!.add(buffer);
+        }
+      } else this.release.call(manager,buffer,reuse);
     };
   }
   private pin(buffer: GPUBuffer) {
@@ -34,7 +76,7 @@ export class TensorReplay {
       const count = this.pins.get(buffer)! - 1;
       if (count) this.pins.set(buffer, count);
       else {
-        this.pins.delete(buffer);
+        this.pins.delete(buffer); this.immutable.delete(buffer);
         if (this.deferred.has(buffer)) {
           this.release.call(this.backend.bufferManager, buffer, this.deferred.get(buffer));
           this.deferred.delete(buffer);
@@ -52,7 +94,7 @@ export class TensorReplay {
     const device = this.backend.device, queue = device.queue;
     const originalEncoder = device.createCommandEncoder, originalBindGroup = device.createBindGroup, originalSubmit = queue.submit;
     const buffers = new Set<GPUBuffer>(), recorded = new Map<GPUCommandBuffer, Encode[]>(), batches: Batch[] = [];
-    this.collecting = buffers;
+    this.collecting = buffers; this.available = new Map(); this.availableSet = new Set();
     // Even unused inputs are written during replay. Keep them out of the pool
     // while another cached plan reassigns its TensorFlow variables.
     for (const input of inputs) this.pin(input);
@@ -103,7 +145,7 @@ export class TensorReplay {
     } catch (error) { this.unpin(buffers); throw error; }
     finally {
       device.createCommandEncoder = originalEncoder; device.createBindGroup = originalBindGroup; queue.submit = originalSubmit;
-      this.collecting = undefined;
+      this.collecting = undefined; this.available = undefined; this.availableSet = undefined;
     }
   }
   dispose() {

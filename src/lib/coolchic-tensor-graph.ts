@@ -4,7 +4,7 @@ import '@tensorflow/tfjs-core/dist/register_all_gradients';
 import '@tensorflow/tfjs-backend-webgpu';
 import type { WebGPUBackend } from '@tensorflow/tfjs-backend-webgpu';
 import { addN as gpuAddN } from '@tensorflow/tfjs-backend-webgpu/dist/kernels/AddN';
-import { TensorReplay, CapturedTensorGradient, type GraphInputBuffer } from './coolchic-tensor-replay';
+import { TensorReplay, CapturedTensorGradient, useQueueTensorUploads, type GraphInputBuffer } from './coolchic-tensor-replay';
 import { GpuSoap, type SoapLayout, type SoapBasis } from './coolchic-gpu-optimizer';
 import { registerFusedCoolChicKernels, fusedClippedMse, fusedImageQuant, fusedExpand, fusedQuantize, fusedRate, fusedContext, fusedFilter, fusedConvolution } from './coolchic-tensor-fused';
 
@@ -42,7 +42,9 @@ async function initialize() {
   if (!await tf.setBackend('webgpu')) throw new Error('WebGPU tensor backend initialization failed');
   await tf.ready();
   registerFusedCoolChicKernels();
-  const device = (tf.backend() as WebGPUBackend).device;
+  const backend = tf.backend() as WebGPUBackend;
+  useQueueTensorUploads(backend);
+  const device = backend.device;
   device.addEventListener('uncapturederror', event => {
     // Keep the original failure, not a later "parent device is lost" symptom.
     gpuFailure ??= event.error.message;
@@ -50,7 +52,7 @@ async function initialize() {
   void device.lost.then(info => {
     const message = `Cool-chic WebGPU device lost (${info.reason}): ${info.message || 'No details provided by the browser'}`;
     gpuFailure ??= message;
-    console.error(message);
+    console.error(`${message} [tensor memory: ${Math.round(backend.bufferManager.numBytesAllocated / 1024 ** 2)} MiB; live buffers: ${backend.bufferManager.getNumUsedBuffers()}]`);
   });
   // TFJS 4.22's AddN binds every operand at once, exceeding WebGPU's default
   // 8-storage-buffer limit for shared ARM gradients / >7 latent rates. Reduce
