@@ -49,6 +49,9 @@ impl Conv2d {
     pub fn forward(&self, input: &Tensor) -> Result<Tensor> {
         self.validate(input)?;
         let mut output = Tensor::zeros(self.output_channels, input.height, input.width)?;
+        if super::acceleration::convolution(self, input, None, &mut output.data) {
+            return Ok(output);
+        }
         // CHW pointwise GEMM: stream contiguous planes so LLVM can SIMD-
         // vectorize in WASM, retaining the channel accumulation order.
         if self.kernel == 1 {
@@ -112,6 +115,18 @@ impl Conv2d {
             != (self.output_channels, input.height, input.width)
         {
             return Err(Error("Invalid reference convolution gradient shape"));
+        }
+        if super::acceleration::eligible(self, input, true) {
+            let mut accelerated = vec![0.0; input.data.len() + self.weight.len() + self.bias.len()];
+            if super::acceleration::convolution(self, input, Some(gradient), &mut accelerated) {
+                let bias = accelerated.split_off(input.data.len() + self.weight.len());
+                let weight = accelerated.split_off(input.data.len());
+                return Ok(ConvGradient {
+                    input: Tensor::new(input.channels, input.height, input.width, accelerated)?,
+                    weight,
+                    bias,
+                });
+            }
         }
         let activated = if self.relu {
             Some(self.forward(input)?)

@@ -32,7 +32,7 @@ test('Cool-chic trains, downloads a portable bitstream and retains its real deco
   await expect(pane.getByRole('radio', { name: 'LOP', exact: true })).toBeChecked();
   await expect(pane.getByLabel('Training iterations', { exact: true })).toHaveAttribute('aria-valuetext', '2000 iterations');
   await expect(pane.getByLabel('Rate constraint (λ)', { exact: true })).toHaveAttribute('aria-valuetext', '0.001');
-  await expect(pane.getByRole('checkbox')).toHaveCount(0);
+  await expect(pane.getByRole('checkbox', { name: 'GPU training', exact: true })).toBeChecked();
   await expect(pane.locator('.model-card')).toHaveCount(0);
   await upload(page);
   await pane.getByRole('button', { name: 'Encode', exact: true }).click();

@@ -9,10 +9,11 @@ description = "Browser-portable Cool-chic v5 reference RGB codec and intra MSE t
 crate-type = ["cdylib", "rlib"]
 
 [features]
-wasm = ["dep:wasm-bindgen"]
+wasm = ["dep:wasm-bindgen", "dep:js-sys"]
 
 [dependencies]
 wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
 constriction = "=0.4.2"
 probability = "0.20"
 nalgebra = { version = "0.34", default-features = false, features = ["std"] }

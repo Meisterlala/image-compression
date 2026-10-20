@@ -26,6 +26,7 @@
     "@playwright/test": "^1.56.0",
     "@types/node": "^24.0.0",
     "@vitejs/plugin-vue": "^6.0.1",
+    "@webgpu/types": "^0.1.74",
     "typescript": "~5.9.3",
     "vite": "^7.1.0",
     "vitest": "^3.2.4",

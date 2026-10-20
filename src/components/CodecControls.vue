@@ -15,6 +15,10 @@ const coolchicIterations = computed({
   get: () => iterationsToSlider(settings.value.coolchicIterations),
   set: (value: number) => { settings.value.coolchicIterations = iterationsFromSlider(value); },
 });
+const coolchicGpu = computed({
+  get: () => settings.value.coolchicGpu !== false,
+  set: (value: boolean) => { settings.value = { ...settings.value, coolchicGpu: value }; },
+});
 // Older persisted settings without this field also default to GPU-first.
 const gpuDecode = computed({
   get: () => settings.value.gpuDecode !== false,
@@ -43,6 +47,10 @@ const gpuDecode = computed({
       </div>
     </template>
     <template v-else-if="settings.format === 'coolchic'">
+      <div class="decode-setting">
+        <label class="checkbox-row"><input v-model="coolchicGpu" type="checkbox"> GPU training</label>
+        <span>WebGPU for large convolutions; CPU fallback</span>
+      </div>
       <div class="field coolchic-point-field">
         <div class="control-heading">
           <span :id="id('complexity-label')">Compression preset</span>

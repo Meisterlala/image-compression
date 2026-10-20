@@ -94,6 +94,7 @@ self.onmessage = async ({ data }: MessageEvent<Job | { type: 'confirm' }>) => {
       progress(`Encoding ${s.format.toUpperCase()} locally…`);
       let tick = performance.now();
       encoded = await codec.encode(new ImageData(pixels, width, height));
+      if ('notices' in codec) notices.push(...codec.notices);
       encodeMs = performance.now() - tick;
       progress('Decoding compressed output for an honest preview…');
       tick = performance.now();
