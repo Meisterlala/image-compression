@@ -12,6 +12,9 @@ Forward and analytical reverse-mode implementations, checked against fixtures pr
 - Nonlinear synthesis trunk, optional linear stabiliser (including omission of common-randomness channels), and output transform.
 - Learned symmetric/separable transposed-convolution upsampling with the reference border padding/crop; residual pre-concatenation filters.
 - Soft-round quantization, double soft-round with supplied Gaussian noise, hard rounding, and Kumaraswamy noise transform.
+- Full learned latent pyramid, including odd-size cropping, shared/per-level kernels and gradient accumulation.
+- Residual ARM MLP, optional stabiliser, IFCE linear network primitive, causal spatial contexts and zero-padded gradient scatter.
+- Actual Laplace rate (not an L1 proxy), probability floor, scale clamp and analytical gradients into latents and ARM outputs.
 
 The fixtures cover single-pixel and odd-sized tensors, learned nonzero filters, gradients of inputs and every network/filter parameter, and multiple soft-round temperatures. Numerical parity uses absolute/relative float32 tolerances, not bit-exact claims.
 
@@ -19,8 +22,7 @@ Upstream v5's `ste` branch assigns its result inside `torch.no_grad`, detaching 
 
 ## Remaining before replacing the app codec
 
-- Assemble full latent hierarchy, including odd-size cropping and backward propagation.
-- Trainable residual ARM, IFCE, causal context extraction and Laplace rate derivatives.
+- Assemble cross-resolution IFCE contexts and integrate the neural modules into a complete training graph.
 - Reference SOAP network optimizer and Adam-like latent updates, clipping, warm-up candidate selection, schedules, validation/checkpoint selection and quantization search.
 - Reference architecture/configuration choices and parameter initialization; wire rate constraint and iteration controls to actual reference settings, not the old quality/pass shortcuts.
 - Generalized bitstream headers/neural parameter parsing, integer ARM/IFCE and entropy coding for reference architectures; complete image reconstruction.

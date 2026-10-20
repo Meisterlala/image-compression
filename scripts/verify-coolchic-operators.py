@@ -30,8 +30,9 @@ def main():
     sys.path.insert(0, str(reference))
     import torch
     from coolchic.component.core.synthesis import Synthesis, SynthesisConv2d
+    from coolchic.component.core.arm import Arm, ArmLinear, _get_neighbor, _get_non_zero_pixel_ctx_index, _laplace_cdf
     from coolchic.component.core.upsampling import (
-        UpsamplingSeparableSymmetricConv2d,
+        Upsampling, UpsamplingSeparableSymmetricConv2d,
         UpsamplingSeparableSymmetricConvTranspose2d,
     )
     from coolchic.component.core.quantizer import quantize, softround, generate_kumaraswamy_noise
@@ -67,7 +68,8 @@ def main():
     def conv_grad(module):
         return {"weight": flat(module.weight.grad), "bias": flat(module.bias.grad)}
 
-    cases = {"upstream_revision": REVISION, "convolution": [], "synthesis": [], "filter": [], "quantizer": []}
+    cases = {"upstream_revision": REVISION, "pytorch_version": str(torch.__version__), "convolution": [], "synthesis": [], "filter": [],
+        "quantizer": [], "arm": [], "context": [], "rate": [], "pyramid": []}
     for height, width in [(1, 1), (3, 5)]:
         for kernel, residual, relu in [(1, False, False), (3, False, True), (3, True, True)]:
             module = SynthesisConv2d(3, 3 if residual else 2, kernel, residual)
@@ -140,6 +142,69 @@ def main():
             cases["quantizer"].append({"mode": mode, "temperature": temperature, "input": flat(x),
                 "noise": flat(noise), "output": flat(output),
                 "derivative": flat(x.grad) if x.grad is not None else [0.0] * x.numel()})
+
+    def affine(module, relu):
+        return {"input_channels": module.in_channels, "output_channels": module.out_channels,
+            "kernel": 1, "residual": module.residual, "relu": relu,
+            "weight": flat(module.weight), "bias": flat(module.bias)}
+
+    def pointwise(value):
+        return tensor(value.T.reshape(1, value.shape[1], 1, value.shape[0]))
+
+    for dimension, hidden, stabiliser, outputs in [(6, 0, False, 2), (6, 2, True, 2), (16, 2, True, 2), (3, 0, False, 4)]:
+        module = Arm(dimension, hidden, outputs, stabiliser)
+        fill(module)
+        x = sequence((15, dimension), offset=5).requires_grad_()
+        y = module(x)
+        upstream = sequence(y.shape, offset=9)
+        (y * upstream).sum().backward()
+        layers = [layer for layer in module.mlp if isinstance(layer, ArmLinear)]
+        cases["arm"].append({"layers": [affine(layer, i < len(layers) - 1) for i, layer in enumerate(layers)],
+            "stabiliser": affine(module.stabiliser_branch, False) if stabiliser else None,
+            "input": pointwise(x), "output": pointwise(y), "upstream": pointwise(upstream),
+            "input_grad": pointwise(x.grad), "layer_grad": [conv_grad(layer) for layer in layers],
+            "stabiliser_grad": conv_grad(module.stabiliser_branch) if stabiliser else None})
+
+    for count in [0, 6, 16, 40]:
+        x = sequence((1, 1, 3, 5), offset=9).requires_grad_()
+        neighbours = _get_neighbor(x, _get_non_zero_pixel_ctx_index(count), 9)
+        y = neighbours.reshape(15, count).T.reshape(1, count, 3, 5)
+        upstream = sequence(y.shape, offset=13)
+        (y * upstream).sum().backward()
+        cases["context"].append({"input": tensor(x), "count": count, "output": tensor(y),
+            "upstream": tensor(upstream), "input_grad": tensor(x.grad)})
+
+    x = (torch.arange(15, dtype=torch.float32) / 4 - 2.0).requires_grad_()
+    raw = torch.stack([x.detach() + torch.tensor([0.5, -0.5, 0.0, 0.25, -0.25] * 3),
+        torch.tensor([-2., -1., 0., 1., 2., 3., 4., 5., 6., 8., 9., 10., 11., 14., -6.])], dim=1).requires_grad_()
+    arm = Arm(6, 0)
+    mu, scale = arm.reparameterize_output(raw)
+    probability = torch.clamp_min(_laplace_cdf(x + 0.5, mu, scale) - _laplace_cdf(x - 0.5, mu, scale), 2**-16)
+    bits = -torch.log2(probability)
+    bits.sum().backward()
+    cases["rate"].append({"latent": tensor(x.reshape(1, 1, 3, 5)), "raw_arm": pointwise(raw),
+        "bits": tensor(bits.reshape(1, 1, 3, 5)), "latent_grad": tensor(x.grad.reshape(1, 1, 3, 5)),
+        "arm_grad": pointwise(raw.grad)})
+    # Keep raw ARM spatial shape aligned with latent spatial shape.
+    cases["rate"][-1]["raw_arm"]["shape"] = [2, 3, 5]
+    cases["rate"][-1]["arm_grad"]["shape"] = [2, 3, 5]
+
+    for shared in [False, True]:
+        module = Upsampling(8, 3, 1 if shared else 2, 1 if shared else 2)
+        fill(module)
+        module.eval()
+        latents = [sequence((1, 1, h, w), offset=i * 7).requires_grad_()
+            for i, (h, w) in enumerate([(5, 7), (3, 4), (2, 2)])]
+        y = module(latents)
+        upstream = sequence(y.shape, offset=13)
+        (y * upstream).sum().backward()
+        def filter_params(module, mode):
+            original = module.parametrizations.weight.original
+            return {"kernel": module.target_k_size, "half": flat(original), "half_grad": flat(original.grad), "mode": mode}
+        cases["pyramid"].append({"latents": [tensor(x) for x in latents],
+            "latent_grad": [tensor(x.grad) for x in latents], "output": tensor(y), "upstream": tensor(upstream),
+            "upsampling": [filter_params(f, "upsample") for f in module.conv_transpose2ds],
+            "preconcat": [filter_params(f, "residual") for f in module.conv2ds]})
 
     uniform = torch.tensor([0.0, 0.01, 0.25, 0.5, 0.75, 0.99, 1.0])
     cases["noise"] = [{"a": a, "uniform": flat(uniform),

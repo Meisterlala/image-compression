@@ -55,6 +55,36 @@ impl Tensor {
         Ok(())
     }
 
+    pub fn crop(&self, height: usize, width: usize) -> Result<Self> {
+        if height > self.height || width > self.width {
+            return Err(Error("Invalid reference crop"));
+        }
+        let mut output = Self::zeros(self.channels, height, width)?;
+        for c in 0..self.channels {
+            for y in 0..height {
+                let source = self.index(c, y, 0);
+                let target = output.index(c, y, 0);
+                output.data[target..target + width]
+                    .copy_from_slice(&self.data[source..source + width]);
+            }
+        }
+        Ok(output)
+    }
+
+    pub fn concat(&self, other: &Self) -> Result<Self> {
+        if (self.height, self.width) != (other.height, other.width) {
+            return Err(Error("Invalid reference concatenation"));
+        }
+        let channels = self
+            .channels
+            .checked_add(other.channels)
+            .ok_or(Error("Reference channels overflow"))?;
+        let mut output = Self::zeros(channels, self.height, self.width)?;
+        output.data[..self.data.len()].copy_from_slice(&self.data);
+        output.data[self.data.len()..].copy_from_slice(&other.data);
+        Ok(output)
+    }
+
     pub fn first_channels(&self, channels: usize) -> Result<Self> {
         if channels > self.channels {
             return Err(Error("Invalid reference channel slice"));
