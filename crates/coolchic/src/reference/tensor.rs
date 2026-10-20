@@ -41,6 +41,16 @@ impl Tensor {
         (channel * self.height + y) * self.width + x
     }
 
+    pub(super) fn valid_layout(&self) -> bool {
+        self.height > 0
+            && self.width > 0
+            && self
+                .channels
+                .checked_mul(self.height)
+                .and_then(|n| n.checked_mul(self.width))
+                == Some(self.data.len())
+    }
+
     pub fn same_shape(&self, other: &Self) -> bool {
         (self.channels, self.height, self.width) == (other.channels, other.height, other.width)
     }

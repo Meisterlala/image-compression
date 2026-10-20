@@ -11,9 +11,9 @@ pub mod convolution;
 pub mod fixed;
 pub mod inter_feature;
 pub mod network;
-pub mod parameters;
 #[cfg(feature = "parallel")]
 mod parallel;
+pub mod parameters;
 pub mod preset;
 pub mod pyramid;
 pub mod quantization;
@@ -23,6 +23,8 @@ pub mod rate;
 pub mod resize;
 pub mod soap;
 pub mod stream;
+#[cfg(test)]
+mod tape_tests;
 pub mod tensor;
 pub mod training;
 pub mod upsampling;

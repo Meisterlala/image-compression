@@ -1,6 +1,11 @@
 // The Rust trainer is synchronous. A second worker owns WebGPU and completes
 // async readbacks while the training worker sleeps (not spins) in Atomics.wait.
-// No shared WASM memory, threaded Rust build, or global cross-codec GPU state.
+// No global cross-codec GPU state. Input views may borrow shared WASM memory.
+import { convolutionShape } from './coolchic-shape';
+
+/** Synchronous callback. Results may borrow the response buffer and are valid
+ * until the next call; Rust copies them before returning from this call stack.
+ * The async factory does not make convolution() asynchronous. */
 export type ConvCallback = (params: Uint32Array, input: Float32Array, weight: Float32Array, bias: Float32Array, gradient: Float32Array | null) => Float32Array | null;
 export interface Acceleration {
   convolution: ConvCallback;
@@ -34,9 +39,12 @@ export async function createCoolChicAcceleration(cpu?: ConvCallback): Promise<Ac
   const decisions = new Map<string, boolean>();
   const raw: ConvCallback = (params, input, weight, bias, gradient) => {
       if (disposed || backend.failure) return null;
-      const inputLength = input.length + weight.length + bias.length + (gradient?.length ?? 0);
-      const outputLength = gradient ? input.length + weight.length + bias.length : params[1] * params[2] * params[3];
-      const bytes = 32 + (inputLength + outputLength) * 4;
+      const shape = convolutionShape(params);
+      if (input.length !== shape.inputCount || weight.length !== shape.weights || bias.length !== shape.co
+          || !!gradient !== !!shape.backward || (gradient?.length ?? 0) !== (shape.backward ? shape.outputCount : 0)) {
+        throw new RangeError('Invalid GPU convolution payload');
+      }
+      const inputLength = shape.inputLength, outputLength = shape.resultCount, bytes = shape.transferBytes;
       if (bytes > 256 * 1024 ** 2) {
         backend.failure = 'GPU transfer exceeds the 256 MiB budget';
         return null;

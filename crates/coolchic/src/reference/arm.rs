@@ -60,7 +60,16 @@ impl Arm {
         gradient: &Tensor,
         states: &[Tensor],
     ) -> Result<ArmGradient> {
-        if states.len() != self.layers.len() + 1 {
+        if self.layers.is_empty()
+            || !input.valid_layout()
+            || states.len() != self.layers.len() + 1
+            || states.iter().any(|state| !state.valid_layout())
+            || !states[0].same_shape(input)
+            || self.layers.iter().zip(&states[1..]).any(|(layer, state)| {
+                (state.channels, state.height, state.width)
+                    != (layer.output_channels, input.height, input.width)
+            })
+        {
             return Err(Error("Invalid ARM activation tape"));
         }
         let mut current = gradient.clone();

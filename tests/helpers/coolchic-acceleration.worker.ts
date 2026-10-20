@@ -27,14 +27,16 @@ self.onmessage = async ({ data }) => {
       const codec = await loadCoolChic({ ...defaultSettings, coolchicGpu: data.gpu, coolchicIterations: 100 }, () => {});
       const start = performance.now();
       const bytes = await codec.encode(new ImageData(new Uint8ClampedArray(rgba), w, h));
-      self.postMessage({ bytes: Array.from(bytes), notices: codec.notices, ms: performance.now() - start });
+      if (!(bytes.buffer instanceof ArrayBuffer)) throw new Error('Expected owned encoded bytes');
+      self.postMessage({ bytes, notices: codec.notices, ms: performance.now() - start }, [bytes.buffer]);
       return;
     }
     const runtime = await loadCoolChicRuntime(!!data.threads, typeof data.threads === 'number' ? data.threads : undefined);
     const { CoolChicEncoder, setCoolChicAccelerator, coolChicCpuConvolution } = runtime.bindings;
     if (data.type === 'kernel') {
       const result = coolChicCpuConvolution(new Uint32Array(data.params), new Float32Array(data.input), new Float32Array(data.weight), new Float32Array(data.bias), data.gradient ? new Float32Array(data.gradient) : undefined);
-      self.postMessage({ result: Array.from(result), threads: runtime.threads, warning: runtime.warning });
+      if (!(result.buffer instanceof ArrayBuffer)) throw new Error('Expected owned diagnostic output');
+      self.postMessage({ result, threads: runtime.threads, warning: runtime.warning }, [result.buffer]);
       return;
     }
     // Force offload on a tiny real job to test the entire WASM callback path,
@@ -63,7 +65,8 @@ self.onmessage = async ({ data }) => {
         let squaredError = 0;
         for (let i = 0; i < pixels.length; i++) if (i % 4 !== 3) squaredError += (pixels[i] - rgba[i]) ** 2;
         const psnr = 10 * Math.log10(255 ** 2 / (squaredError / (w * h * 3)));
-        self.postMessage({ bytes: Array.from(bytes), pixels: Array.from(pixels), ms, psnr, calls: gpu?.calls ?? 0, failure: gpu?.failure, threads: runtime.threads });
+        if (!(bytes.buffer instanceof ArrayBuffer) || !(pixels.buffer instanceof ArrayBuffer)) throw new Error('Expected owned codec outputs');
+        self.postMessage({ bytes, pixels, ms, psnr, calls: gpu?.calls ?? 0, failure: gpu?.failure, threads: runtime.threads }, [bytes.buffer, pixels.buffer]);
       }
       finally { image.free(); }
     } finally { encoder?.free(); setCoolChicAccelerator(undefined, 0); gpu?.dispose(); }

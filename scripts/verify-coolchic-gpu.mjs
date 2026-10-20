@@ -22,7 +22,13 @@ try {
   const runWorker = data => page.evaluate(data => new Promise((resolve, reject) => {
     const worker = new Worker('/tests/helpers/coolchic-acceleration.worker.ts', { type: 'module' });
     const timer = setTimeout(() => { worker.terminate(); reject(new Error('Training test timed out')); }, 180000);
-    worker.onmessage = ({ data }) => { clearTimeout(timer); worker.terminate(); data.error ? reject(new Error(data.error)) : resolve(data); };
+    worker.onmessage = ({ data }) => {
+      clearTimeout(timer); worker.terminate();
+      // Worker-to-page uses transferred buffers. Materialize arrays only at
+      // Playwright's JSON boundary, where the native verifier needs the bytes.
+      for (const key of ['bytes', 'pixels', 'result']) if (ArrayBuffer.isView(data[key])) data[key] = Array.from(data[key]);
+      data.error ? reject(new Error(data.error)) : resolve(data);
+    };
     worker.onerror = event => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message)); };
     worker.postMessage(data);
   }), data);

@@ -1,7 +1,7 @@
 //! Training randomness is local/reproducible, not a server dependency. The
 //! separate common-noise generator is bitstream-defined and matches upstream.
 use super::Tensor;
-use crate::Result;
+use crate::{Error, Result};
 
 #[derive(Clone, Debug)]
 pub struct Random {
@@ -26,14 +26,22 @@ impl Random {
     /// Preserve the scalar RNG stream, but evaluate independent Box-Muller
     /// pairs in parallel. The hot transcendental work no longer serializes
     /// the entire training worker. Odd counts keep the unscaled spare sample.
-    pub fn normal_values(&mut self, count: usize) -> Vec<f32> {
+    pub fn normal_values(&mut self, count: usize) -> Result<Vec<f32>> {
         if count == 0 {
-            return Vec::new();
+            return Ok(Vec::new());
         }
-        let spare = self.spare.take();
+        let spare = self.spare;
         let offset = usize::from(spare.is_some());
         let extra = (count - offset) % 2;
-        let mut values = vec![0.0; count + extra];
+        let len = count
+            .checked_add(extra)
+            .ok_or(Error("Noise batch length overflow"))?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(len)
+            .map_err(|_| Error("Insufficient memory for noise batch"))?;
+        values.resize(len, 0.0);
+        self.spare = None;
         if let Some(value) = spare {
             values[0] = value;
         }
@@ -48,7 +56,7 @@ impl Random {
             pair[1] = radius * angle.sin();
         };
         #[cfg(feature = "parallel")]
-        let parallel = super::parallel::worthwhile(count * 32);
+        let parallel = super::parallel::worthwhile(count.saturating_mul(32));
         #[cfg(not(feature = "parallel"))]
         let parallel = false;
         if parallel {
@@ -69,7 +77,7 @@ impl Random {
         if extra != 0 {
             self.spare = values.pop();
         }
-        values
+        Ok(values)
     }
 
     pub fn normal(&mut self) -> f32 {
@@ -107,6 +115,21 @@ pub fn common_noise(shapes: &[(usize, usize)]) -> Result<Vec<Tensor>> {
 mod tests {
     use super::Random;
     #[test]
+    fn oversized_noise_batches_fail_without_advancing_the_rng() {
+        for with_spare in [false, true] {
+            let mut random = Random::new(123);
+            if with_spare {
+                random.normal();
+            }
+            let before = random.clone();
+            assert!(random.normal_values(usize::MAX).is_err());
+            assert!(random.normal_values(usize::MAX - 1).is_err());
+            assert_eq!(random.state, before.state);
+            assert_eq!(random.spare, before.spare);
+        }
+    }
+
+    #[test]
     fn batched_normals_preserve_the_exact_scalar_stream_and_spare() {
         let mut scalar = Random::new(123);
         let mut batched = scalar.clone();
@@ -114,6 +137,7 @@ mod tests {
             let expected: Vec<_> = (0..count).map(|_| scalar.normal().to_bits()).collect();
             let actual: Vec<_> = batched
                 .normal_values(count)
+                .unwrap()
                 .iter()
                 .map(|v| v.to_bits())
                 .collect();

@@ -169,7 +169,7 @@ impl Runner {
         let noise: Vec<f32> = if matches!(self.phase.quantizer, Quantizer::Hard) {
             vec![0.0; n]
         } else {
-            let mut values = random.normal_values(n);
+            let mut values = random.normal_values(n)?;
             for value in &mut values {
                 *value *= sigma;
             }

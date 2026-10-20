@@ -24,6 +24,7 @@ fn real_parallel_convolutions_match_single_thread_forward_and_derivatives() {
     for (ci, co, h, w, k, residual, relu) in [
         (8, 8, 129, 131, 1, true, true),
         (3, 3, 129, 131, 3, true, true),
+        (2, 5, 129, 131, 3, false, true),
         // Oversized kernels, degenerate axes and repeated replicate samples.
         (2, 2, 1, 157, 41, true, false),
         (2, 3, 157, 1, 41, false, true),
@@ -59,6 +60,8 @@ fn real_parallel_convolutions_match_single_thread_forward_and_derivatives() {
         };
         let expected = serial.install(|| layer.forward(&input)).unwrap();
         let actual = parallel.install(|| layer.forward(&input)).unwrap();
+        assert_eq!(actual.channels, co);
+        assert_eq!(actual.data.len(), co * h * w);
         close(&actual.data, &expected.data);
         let expected = serial
             .install(|| layer.backward(&input, &gradient))

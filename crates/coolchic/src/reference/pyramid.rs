@@ -17,8 +17,9 @@ pub struct PyramidGradient {
 }
 
 impl Pyramid {
-    fn states(&self, latents: &[Tensor]) -> Result<Vec<Tensor>> {
+    fn validate(&self, latents: &[Tensor]) -> Result<()> {
         if latents.is_empty()
+            || latents.iter().any(|latent| !latent.valid_layout())
             || (latents.len() > 1 && (self.upsampling.is_empty() || self.preconcat.is_empty()))
             || self
                 .upsampling
@@ -31,6 +32,11 @@ impl Pyramid {
         {
             return Err(Error("Invalid reference latent pyramid"));
         }
+        Ok(())
+    }
+
+    fn states(&self, latents: &[Tensor]) -> Result<Vec<Tensor>> {
+        self.validate(latents)?;
         let mut states = vec![latents.last().unwrap().clone()];
         for (index, target) in latents.iter().rev().skip(1).enumerate() {
             if target.channels == 0 {
@@ -65,8 +71,36 @@ impl Pyramid {
         gradient: &Tensor,
         states: &[Tensor],
     ) -> Result<PyramidGradient> {
-        if states.is_empty() || !gradient.same_shape(states.last().unwrap()) {
-            return Err(Error("Invalid reference pyramid gradient shape"));
+        self.validate(latents)?;
+        let targets = latents
+            .iter()
+            .rev()
+            .skip(1)
+            .take_while(|latent| latent.channels != 0);
+        if states.len() != targets.clone().count() + 1
+            || states.iter().any(|state| !state.valid_layout())
+            || !states[0].same_shape(latents.last().unwrap())
+            || !gradient.valid_layout()
+            || !gradient.same_shape(states.last().unwrap())
+        {
+            return Err(Error("Invalid reference pyramid activation tape"));
+        }
+        for (index, target) in targets.enumerate() {
+            let low = &states[index];
+            let high = &states[index + 1];
+            if low.channels.checked_add(target.channels) != Some(high.channels)
+                || (high.height, high.width) != (target.height, target.width)
+                || low
+                    .height
+                    .checked_mul(2)
+                    .is_none_or(|height| target.height > height)
+                || low
+                    .width
+                    .checked_mul(2)
+                    .is_none_or(|width| target.width > width)
+            {
+                return Err(Error("Invalid reference pyramid activation tape"));
+            }
         }
         let mut result = PyramidGradient {
             latents: latents

@@ -14,15 +14,23 @@ async function initThreads(count: number) {
   return { bindings, threads: count };
 }
 
+export function cpuThreadCount(cores: number, requested?: number) {
+  if (requested !== undefined) {
+    if (!Number.isInteger(requested) || requested < 1 || requested > 16) throw new RangeError('CPU thread count must be an integer from 1 to 16');
+    return requested;
+  }
+  const available = Number.isSafeInteger(cores) && cores > 0 ? cores : 1;
+  return Math.min(16, Math.max(1, available > 2 ? available - 1 : available));
+}
+
 /** Both modules expose the same codec API. Shared-memory WASM is a separate
  * lazy asset, so lack of isolation/threads never prevents portable encoding. */
 export async function loadCoolChicRuntime(useThreads: boolean, requestedThreads?: number): Promise<{
   bindings: CodecBindings; threads: number; warning?: string;
 }> {
+  const count = cpuThreadCount(navigator.hardwareConcurrency, requestedThreads);
   let warning: string | undefined;
   if (useThreads && globalThis.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined') {
-    const cores = navigator.hardwareConcurrency || 1;
-    const count = requestedThreads ?? Math.min(16, Math.max(1, cores > 2 ? cores - 1 : cores));
     if (count > 1) {
       try {
         // Feature test before fetching the threaded module.

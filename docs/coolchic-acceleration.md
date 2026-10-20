@@ -95,7 +95,16 @@ isolation. `--require-gpu` makes unavailable GPU hardware a failure rather than 
 skip. `--benchmark` also compares portable WASM, adaptive GPU, 4/8 CPU threads and
 the automatic pool and GPU + automatic threads. Unit tests inject timeout/device failure and check crossover
 selection/disposal. Native parallel tests compare large kernels and learned-filter
-derivatives with a genuine one-thread pool, not just pool startup.
+derivatives with a genuine one-thread pool, not just pool startup. Regression
+checks also cover malformed activation tapes, noise-length overflow without RNG
+advancement, safe-integer GPU sizing, and bounded explicit pool sizes. The test
+worker transfers typed buffers; only the Playwright-to-native JSON boundary
+materializes arrays for independent byte/pixel checks.
+
+The compute callback is synchronous even though its factory is asynchronous.
+Its response is borrowed until the next invocation: Rust calls `copy_to` on the
+same stack before another convolution can run. No Promise or `await` separates
+callback return from that copy. Tests cover this consumption contract and reuse.
 
 ### Local measurements (not codec-wide benchmarks)
 

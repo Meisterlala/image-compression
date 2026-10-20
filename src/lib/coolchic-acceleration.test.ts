@@ -8,6 +8,7 @@ class MockWorker {
   terminated = false;
   fail = false;
   jobs = 0;
+  output = new Float32Array([7, 10]);
   constructor() { MockWorker.instances.push(this); }
   terminate() { this.terminated = true; }
   postMessage(data: { type: string; shared?: SharedArrayBuffer; inputLength?: number; outputLength?: number }) {
@@ -15,7 +16,7 @@ class MockWorker {
     if (data.type === 'convolution') {
       this.jobs++;
       const shared = data.shared!;
-      if (!this.fail) new Float32Array(shared, 32 + data.inputLength! * 4, data.outputLength).set([7, 10]);
+      if (!this.fail) new Float32Array(shared, 32 + data.inputLength! * 4, data.outputLength).set(this.output);
       Atomics.store(new Int32Array(shared, 0, 8), 0, this.fail ? -1 : 1);
     }
   }
@@ -44,6 +45,23 @@ describe('Cool-chic WASM compute bridge', () => {
     backend.dispose();
     expect(MockWorker.instances[0]!.terminated).toBe(true);
     expect(backend.convolution(params, input, weight, bias, null)).toBeNull();
+  });
+  it('has a synchronous borrowed-response contract and copied results survive buffer reuse', async () => {
+    environment(); const backend = await createCoolChicAcceleration();
+    const borrowed = backend.convolution(params, input, weight, bias, null)!;
+    expect(borrowed).toBeInstanceOf(Float32Array); // Not a Promise: no await/re-entry before Rust copies.
+    const consumed = new Float32Array(borrowed); // Equivalent to Rust's immediate copy_to(output).
+    MockWorker.instances[0]!.output.set([13, 16]);
+    const later = backend.convolution(params, input, weight, bias, null);
+    expect(later).toEqual(new Float32Array([13, 16]));
+    expect(consumed).toEqual(new Float32Array([7, 10]));
+    backend.dispose();
+  });
+  it('rejects malformed payloads before posting compute work', async () => {
+    environment(); const backend = await createCoolChicAcceleration();
+    expect(() => backend.convolution(params, new Float32Array(0), weight, bias, null)).toThrow('payload');
+    expect(MockWorker.instances[0]!.jobs).toBe(0);
+    backend.dispose();
   });
   it('bounds hangs and disables the accelerator after timeout', async () => {
     environment(); const backend = await createCoolChicAcceleration();

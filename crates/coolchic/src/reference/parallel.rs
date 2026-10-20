@@ -12,6 +12,8 @@ pub fn forward(layer: &Conv2d, input: &Tensor) -> Result<Tensor> {
     let pixels = input.height * input.width;
     let mut output = Tensor::zeros(layer.output_channels, input.height, input.width)?;
     if layer.kernel != 1 {
+        // Partition the output allocation (co * height rows), never the input
+        // channel count; rectangular ci != co convolutions use the same path.
         output
             .data
             .par_chunks_mut(input.width)

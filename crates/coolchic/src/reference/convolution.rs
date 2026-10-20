@@ -33,6 +33,7 @@ impl Conv2d {
             || self.kernel.is_multiple_of(2)
             || self.output_channels == 0
             || input.channels != self.input_channels
+            || !input.valid_layout()
             || count != Some(self.weight.len())
             || self.bias.len() != self.output_channels
             || (self.residual && self.input_channels != self.output_channels)
@@ -147,10 +148,14 @@ impl Conv2d {
         output: Option<&Tensor>,
     ) -> Result<ConvGradient> {
         self.validate(input)?;
-        if (gradient.channels, gradient.height, gradient.width)
-            != (self.output_channels, input.height, input.width)
+        if !gradient.valid_layout()
+            || (gradient.channels, gradient.height, gradient.width)
+                != (self.output_channels, input.height, input.width)
         {
             return Err(Error("Invalid reference convolution gradient shape"));
+        }
+        if output.is_some_and(|state| !state.valid_layout() || !state.same_shape(gradient)) {
+            return Err(Error("Invalid convolution activation tape shape"));
         }
         if super::acceleration::eligible(self, input, true) {
             let mut accelerated = vec![0.0; input.data.len() + self.weight.len() + self.bias.len()];
@@ -322,7 +327,17 @@ impl Synthesis {
         gradient: &Tensor,
         states: &[Tensor],
     ) -> Result<SynthesisGradient> {
-        if states.len() != self.trunk.len() + 2 {
+        if self.trunk.is_empty()
+            || !input.valid_layout()
+            || states.len() != self.trunk.len() + 2
+            || states.iter().any(|state| !state.valid_layout())
+            || !states[0].same_shape(input)
+            || self.trunk.iter().zip(&states[1..]).any(|(layer, state)| {
+                (state.channels, state.height, state.width)
+                    != (layer.output_channels, input.height, input.width)
+            })
+            || !states[states.len() - 1].same_shape(&states[states.len() - 2])
+        {
             return Err(Error("Invalid synthesis activation tape"));
         }
         let output_transform = self
