@@ -493,8 +493,8 @@ test('floating comparison has independent selectors and follows tabs and complet
   await expect(card.locator('.viewer-toolbar')).not.toContainText(/\d+\s*×\s*\d+/);
   await expect(right.locator('option[value="avif"]')).toHaveJSProperty('disabled', true);
   await expect(pane(page, 'jpeg').getByRole('button', { name: 'Download JPEG', exact: true })).toBeVisible();
-  await expect(pane(page, 'jpeg').getByRole('button', { name: 'Preview PNG', exact: true })).toBeVisible();
-  await expect(card.getByRole('button', { name: /Download|Preview PNG/ })).toHaveCount(0);
+  await expect(pane(page, 'jpeg').getByRole('button', { name: 'Download lossless PNG', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: /Download/ })).toHaveCount(0);
   await expect(page.locator('.codec-pane .comparison')).toHaveCount(0);
   const position = await page.evaluate(() => ({
     encoder: document.querySelector('[data-codec="jpeg"]')!.getBoundingClientRect().bottom,

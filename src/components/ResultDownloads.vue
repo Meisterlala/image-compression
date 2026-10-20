@@ -10,18 +10,18 @@ function saveCompressed() {
   const point = result.settings.format === 'jpegai' ? `-${result.settings.operatingPoint}` : '';
   download(new Blob([result.encoded], { type: format.mime }), `${name}${point}-${result.width}x${result.height}.${format.extension}`);
 }
-function savePreview() {
+function saveLosslessPng() {
   const result = props.result;
   const canvas = document.createElement('canvas');
   draw(canvas, new ImageData(result.pixels, result.width, result.height));
-  canvas.toBlob(blob => { if (blob) download(blob, 'decoded-preview.png'); }, 'image/png');
+  canvas.toBlob(blob => { if (blob) download(blob, 'decoded-lossless.png'); }, 'image/png');
 }
 </script>
 
 <template>
   <div class="download-row" role="group" aria-label="Image downloads">
     <button @click="saveCompressed">Download {{ formats.find(format => format.id === result.settings.format)?.label }}</button>
-    <button @click="savePreview">Preview PNG</button>
+    <button @click="saveLosslessPng">Download lossless PNG</button>
   </div>
 </template>
 
