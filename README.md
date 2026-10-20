@@ -1,5 +1,7 @@
 # Image compression playground
 
+View it all online at https://compress.meisterlala.dev
+
 Compare JPEG AI, JPEG, AVIF, JPEG XL and Cool-chic v5 in your browser.
 Images stay on your device; there is no backend. Previews and metrics use decoded
 output bytes. Download compressed files or decoded PNGs; work is saved locally
