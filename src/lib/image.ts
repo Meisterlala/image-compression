@@ -1,22 +1,38 @@
+import { downscaleOptions, MAX_PIXELS } from './limits';
+
 export const MAX_FILE_BYTES = 40 * 1024 * 1024;
-export const MAX_SOURCE_PIXELS = 40_000_000;
-export async function prepareImage(file: File, maxEdge: number): Promise<ImageData> {
+
+export function resizedDimensions(width: number, height: number, downscale: number) {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) throw new Error('Invalid image dimensions.');
+  if (width * height > MAX_PIXELS) throw new Error('Source exceeds 40 megapixels. Resize it before opening.');
+  if (!downscaleOptions.some(option => option.value === downscale)) throw new Error('Invalid downscale option.');
+  const ratio = downscale === 0 ? 1 : Math.min(1, downscale / Math.max(width, height));
+  return {
+    width: Math.max(1, Math.round(width * ratio)),
+    height: Math.max(1, Math.round(height * ratio)),
+  };
+}
+
+export interface PreparedImage { image: ImageData; referenceBytes: number; downscaled: boolean }
+
+export async function prepareImage(file: File, downscale: number): Promise<PreparedImage> {
   if (!file.size || file.size > MAX_FILE_BYTES) throw new Error('Choose an image smaller than 40 MiB.');
-  if (!Number.isFinite(maxEdge) || maxEdge < 32 || maxEdge > 1024) throw new Error('Working size must be between 32 and 1024 px.');
   // Browser decoding is used only for importing user files. Every output codec and metric is WASM.
   const image = await createImageBitmap(file, { imageOrientation: 'from-image', premultiplyAlpha: 'none', colorSpaceConversion: 'default' });
   try {
-    if (image.width * image.height > MAX_SOURCE_PIXELS) throw new Error('Source exceeds 40 megapixels. Resize it before opening.');
-    const ratio = Math.min(1, maxEdge / Math.max(image.width, image.height));
-    const width = Math.max(1, Math.round(image.width * ratio));
-    const height = Math.max(1, Math.round(image.height * ratio));
+    const { width, height } = resizedDimensions(image.width, image.height, downscale);
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     const context = canvas.getContext('2d', { colorSpace: 'srgb', willReadFrequently: true });
     if (!context) throw new Error('A 2D canvas is required');
     context.fillStyle = '#ffffff'; context.fillRect(0, 0, width, height);
     context.imageSmoothingEnabled = true; context.imageSmoothingQuality = 'high';
     context.drawImage(image, 0, 0, width, height);
-    return context.getImageData(0, 0, width, height);
+    const downscaled = width !== image.width || height !== image.height;
+    // Measure an actual PNG of the resized reference, not its raw RGBA allocation.
+    const referenceBytes = downscaled ? (await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not measure the downscaled image.')), 'image/png');
+    })).size : file.size;
+    return { image: context.getImageData(0, 0, width, height), referenceBytes, downscaled };
   } finally { image.close(); }
 }
 export function draw(canvas: HTMLCanvasElement | null, image: ImageData) {

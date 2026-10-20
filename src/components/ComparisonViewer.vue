@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { draw } from '../lib/image';
-import type { Result } from '../types';
 
-const props = defineProps<{ source?: ImageData; result?: Result; format: string }>();
+const props = defineProps<{ left: ImageData; right: ImageData; leftLabel: string; rightLabel: string }>();
 const original = ref<HTMLCanvasElement | null>(null);
 const decoded = ref<HTMLCanvasElement | null>(null);
 const divider = ref(50);
@@ -19,57 +18,48 @@ function startSplit(event: PointerEvent) {
 }
 const zoom = ref('fit');
 const dpr = ref(window.devicePixelRatio);
+const viewportHeight = ref(window.innerHeight);
 const stageStyle = computed(() => {
-  if (!props.source) return {};
   return zoom.value === 'fit'
-    ? { width: `${Math.min(props.source.width, 252 * props.source.width / props.source.height)}px`, maxWidth: '100%' }
-    : { width: `${props.source.width * Number(zoom.value) / dpr.value}px`, maxWidth: 'none' };
+    ? { width: `${Math.min(props.left.width, (Math.max(320, Math.min(viewportHeight.value * 0.52, 660)) - 28) * props.left.width / props.left.height)}px`, maxWidth: '100%' }
+    : { width: `${props.left.width * Number(zoom.value) / dpr.value}px`, maxWidth: 'none' };
 });
 async function render() {
   await nextTick();
-  if (props.source) draw(original.value, props.source);
-  if (props.result) draw(decoded.value, new ImageData(props.result.pixels, props.result.width, props.result.height));
+  draw(original.value, props.left);
+  draw(decoded.value, props.right);
 }
-const updateDpr = () => { dpr.value = window.devicePixelRatio; };
-watch([() => props.source, () => props.result], render, { immediate: true });
+const updateDpr = () => {
+  dpr.value = window.devicePixelRatio;
+  viewportHeight.value = window.innerHeight;
+};
+watch([() => props.left, () => props.right], render, { immediate: true });
 onMounted(() => window.addEventListener('resize', updateDpr));
 onBeforeUnmount(() => window.removeEventListener('resize', updateDpr));
 </script>
 
 <template>
-  <section class="comparison" :aria-label="`Original versus ${format}`">
-    <div class="preview-top">
-      <h3>Original / {{ format }}</h3>
-      <span v-if="result" class="preview-badge">Decoded output</span>
-    </div>
-    <div v-if="!source" class="empty-preview">
-      <p>Choose an image to preview it.</p>
-      <p>Compression results will appear here.</p>
-    </div>
-    <template v-else>
+  <section class="comparison" :aria-label="`${leftLabel} versus ${rightLabel}`">
       <div class="viewer-toolbar">
-        <span>{{ source.width }} × {{ source.height }} px</span>
         <label>View
-          <select v-model="zoom" :aria-label="`${format} preview zoom`">
+          <select v-model="zoom" aria-label="Image comparison zoom">
             <option value="fit">Fit</option>
-            <option value="1">1:1 device pixels</option>
-            <option value="2">2× device pixels</option>
-            <option value="4">4× device pixels</option>
+            <option value="1">1:1 left-image pixels</option>
+            <option value="2">2× left-image pixels</option>
+            <option value="4">4× left-image pixels</option>
           </select>
         </label>
       </div>
       <div class="viewer-scroll" :class="{ fitting: zoom === 'fit' }">
         <div class="image-stage" :class="{ magnified: Number(zoom) >= 2 }" :style="stageStyle">
-          <canvas ref="original" class="image-canvas" :aria-label="`Original working image for ${format}`"></canvas>
+          <canvas ref="original" class="image-canvas left-canvas" :aria-label="`Left ${leftLabel} image`"></canvas>
           <canvas
-            v-show="result"
             ref="decoded"
-            class="image-canvas decoded-canvas"
+            class="image-canvas decoded-canvas right-canvas"
             :style="{ clipPath: `inset(0 0 0 ${divider}%)` }"
-            :aria-label="`Decoded ${format} image`"
+            :aria-label="`Right ${rightLabel} image`"
           ></canvas>
           <div
-            v-if="result"
             class="image-divider"
             :style="{ left: `${divider}%` }"
             @pointerdown.prevent="startSplit"
@@ -77,67 +67,28 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateDpr));
             @pointerup="splitting = false"
             @pointercancel="splitting = false"
           ><span>↔</span></div>
-          <span class="image-label original-label">Original</span>
-          <span v-if="result" class="image-label decoded-label">{{ format }}</span>
+          <span class="image-label original-label">{{ leftLabel }}</span>
+          <span class="image-label decoded-label">{{ rightLabel }}</span>
         </div>
       </div>
-      <label v-if="result" class="divider-control">
+      <label class="divider-control">
         Comparison split
-        <input v-model.number="divider" type="range" min="0" max="100" :aria-label="`${format} comparison split`">
+        <input v-model.number="divider" type="range" min="0" max="100" aria-label="Image comparison split">
       </label>
-      <p v-else class="preview-hint">This is the normalized working image. Compress it to reveal the comparison.</p>
       <p v-if="zoom !== 'fit'" class="preview-hint">Scroll horizontally or vertically to pan. Zoom is measured in device pixels.</p>
-    </template>
   </section>
 </template>
 
 <style scoped>
 .comparison {
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   background: var(--paper);
-}
-
-.preview-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-h3 {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.preview-badge {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.empty-preview {
-  display: flex;
-  min-height: 328px;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.empty-preview p {
-  margin: 5px 16px;
 }
 
 .viewer-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   padding: 12px 16px;
   font: 11px ui-monospace, monospace;
@@ -156,7 +107,7 @@ h3 {
 }
 
 .viewer-scroll {
-  height: 280px;
+  height: clamp(320px, 52vh, 660px);
   overflow: auto;
   padding: 14px;
   background: var(--viewer-background);

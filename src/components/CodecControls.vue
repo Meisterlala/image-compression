@@ -10,22 +10,13 @@ const id = (field: string) => `${settings.value.format}-${field}`;
     <legend class="sr-only">Encoding settings</legend>
     <template v-if="settings.format === 'jpegai'">
       <div class="field">
-        <label :for="id('rate-mode')">Rate control</label>
+        <label :for="id('rate-mode')">Model selection</label>
         <select :id="id('rate-mode')" v-model="settings.rateMode">
-          <option value="model">Model + quantisation</option>
-          <option value="target">Target bitrate search</option>
+          <option value="model">Use selected model</option>
+          <option value="target">Choose model automatically</option>
         </select>
       </div>
       <template v-if="settings.rateMode === 'model'">
-        <div class="field">
-          <label :for="id('model')">Trained model</label>
-          <select :id="id('model')" v-model.number="settings.model">
-            <option :value="0">1 · lowest bitrate</option>
-            <option :value="1">2 · low bitrate</option>
-            <option :value="2">3 · medium bitrate</option>
-            <option :value="3">4 · highest fidelity</option>
-          </select>
-        </div>
         <div class="field full-width">
           <label :for="id('displacement')">Quantisation shift <output>{{ settings.displacement }}</output></label>
           <input :id="id('displacement')" v-model.number="settings.displacement" type="range" min="-1069" max="702" step="1">
@@ -36,7 +27,6 @@ const id = (field: string) => `${settings.value.format}-${field}`;
         <label :for="id('target-bpp')">Target bits / pixel <output>{{ settings.targetBpp.toFixed(2) }}</output></label>
         <input :id="id('target-bpp')" v-model.number="settings.targetBpp" type="range" min="0.1" max="2" step="0.05">
       </div>
-      <p v-if="settings.rateMode === 'target'" class="hint full-width">Searches all four models; encoding may take minutes. Actual bitrate can differ from the target.</p>
     </template>
     <template v-else>
       <div class="field">
@@ -55,7 +45,6 @@ const id = (field: string) => `${settings.value.format}-${field}`;
       </div>
       <label v-if="settings.format !== 'jpeg'" class="checkbox-row"><input v-model="settings.lossless" type="checkbox"> Lossless</label>
       <label v-if="settings.format !== 'avif'" class="checkbox-row"><input v-model="settings.progressive" type="checkbox"> Progressive encoding</label>
-      <p class="hint full-width">Quality scales differ between codecs. Higher effort increases encode time.</p>
     </template>
   </fieldset>
 </template>

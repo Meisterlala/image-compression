@@ -17,6 +17,8 @@
   --button-bg: #206b50;
   --button-ink: #ffffff;
   --danger: #8a3a2e;
+  --best-value: #137438;
+  --worst-value: #b42318;
   --error-bg: #fff0eb;
   --error-ink: #8a3027;
   --focus: #2d865f;
@@ -40,6 +42,8 @@
     --button-bg: #91d6ad;
     --button-ink: #112519;
     --danger: #f1a293;
+    --best-value: #8adea4;
+    --worst-value: #ff998a;
     --error-bg: #3c2623;
     --error-ink: #ffc0b1;
     --focus: #b4efc9;

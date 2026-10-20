@@ -1,19 +1,19 @@
-import { computed, onBeforeUnmount, reactive, shallowReactive, type ShallowRef } from 'vue';
+import { computed, onBeforeUnmount, reactive, shallowReactive, type Ref, type ShallowRef } from 'vue';
 import { defaultSettings, formats, type Format, type Result, type Settings } from '../types';
 import { startJob } from './runner';
 
-export type Phase = 'idle' | 'queued' | 'running' | 'done' | 'cancelled' | 'error';
-export interface PaneStatus { phase: Phase; message: string; error: string }
+export type Phase = 'idle' | 'queued' | 'running' | 'confirming' | 'done' | 'cancelled' | 'error';
+export interface PaneStatus { phase: Phase; message: string; error: string; confirmationBytes: number | null }
 
-export function useComparisons(source: ShallowRef<ImageData | undefined>) {
+export function useComparisons(source: ShallowRef<ImageData | undefined>, referenceBytes: Ref<number>, downscaled: Ref<boolean>) {
   const settings = reactive(Object.fromEntries(formats.map(format => [
     format.id, { ...defaultSettings, format: format.id },
   ])) as Record<Format, Settings>);
   const results = shallowReactive<Partial<Record<Format, Result>>>({});
   const status = reactive(Object.fromEntries(formats.map(format => [
-    format.id, { phase: 'idle', message: 'Not encoded yet.', error: '' },
+    format.id, { phase: 'idle', message: '', error: '', confirmationBytes: null },
   ])) as Record<Format, PaneStatus>);
-  const busy = computed(() => formats.some(({ id }) => ['queued', 'running'].includes(status[id].phase)));
+  const busy = computed(() => formats.some(({ id }) => ['queued', 'running', 'confirming'].includes(status[id].phase)));
   const queue: { format: Format; settings: Settings }[] = [];
   let draining = false;
   let active: { format: Format; job: ReturnType<typeof startJob>; cancelled: boolean } | undefined;
@@ -31,7 +31,15 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>) {
         state.phase = 'running';
         state.message = 'Starting WASM worker…';
         try {
-          const job = startJob({ pixels: image.data, width: image.width, height: image.height, settings: next.settings }, text => state.message = text);
+          const job = startJob(
+            { pixels: image.data, width: image.width, height: image.height, referenceBytes: referenceBytes.value, referenceDownscaled: downscaled.value, settings: next.settings },
+            text => state.message = text,
+            memoryBytes => {
+              state.confirmationBytes = memoryBytes;
+              state.phase = 'confirming';
+              state.message = '';
+            },
+          );
           const current = { format: next.format, job, cancelled: false };
           active = current;
           const output = await job.promise;
@@ -49,14 +57,14 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>) {
             state.message = 'Encoding failed.';
             state.error = error instanceof Error ? error.message : String(error);
           }
-        } finally { active = undefined; }
+        } finally { state.confirmationBytes = null; active = undefined; }
       }
     } finally { draining = false; }
   }
 
   function run(format: Format) {
     const state = status[format];
-    if (!source.value || state.phase === 'queued' || state.phase === 'running') return;
+    if (!source.value || state.phase === 'queued' || state.phase === 'running' || state.phase === 'confirming') return;
     state.phase = 'queued';
     state.error = '';
     state.message = 'Queued. Waiting for the current codec.';
@@ -64,9 +72,12 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>) {
     void drain();
   }
 
-  function runAll() {
-    // Show fast baseline results before a potentially long JPEG AI rate search.
-    for (const format of ['jpeg', 'avif', 'jxl', 'jpegai'] as const) run(format);
+  function confirm(format: Format) {
+    if (active?.format !== format || status[format].phase !== 'confirming') return;
+    status[format].phase = 'running';
+    status[format].confirmationBytes = null;
+    status[format].message = 'Loading JPEG AI models…';
+    active.job.confirm();
   }
 
   function cancel(format: Format) {
@@ -87,10 +98,10 @@ export function useComparisons(source: ShallowRef<ImageData | undefined>) {
   function reset() {
     for (const { id } of formats) {
       delete results[id];
-      Object.assign(status[id], { phase: 'idle', message: 'Not encoded yet.', error: '' });
+      Object.assign(status[id], { phase: 'idle', message: '', error: '', confirmationBytes: null });
     }
   }
 
   onBeforeUnmount(cancelAll);
-  return { settings, results, status, busy, run, runAll, cancel, cancelAll, reset };
+  return { settings, results, status, busy, run, confirm, cancel, reset };
 }

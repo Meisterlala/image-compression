@@ -1,6 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { bytes, compressionStats, duration, runLabel } from './image';
+import { bytes, compressionStats, duration, resizedDimensions, runLabel } from './image';
 import { defaultSettings } from '../types';
+
+describe('downscale dimensions', () => {
+  it('keeps the original resolution when Full is selected', () => {
+    expect(resizedDimensions(6000, 4000, 0)).toEqual({ width: 6000, height: 4000 });
+  });
+  it('fits every preset without stretching landscape or portrait images', () => {
+    for (const edge of [2048, 1024, 512, 256]) {
+      expect(resizedDimensions(4096, 2048, edge)).toEqual({ width: edge, height: edge / 2 });
+      expect(resizedDimensions(2048, 4096, edge)).toEqual({ width: edge / 2, height: edge });
+    }
+  });
+  it('never enlarges a small source or rounds a thin image down to zero', () => {
+    expect(resizedDimensions(96, 64, 2048)).toEqual({ width: 96, height: 64 });
+    expect(resizedDimensions(1, 4000, 256)).toEqual({ width: 1, height: 256 });
+  });
+  it('rejects unsupported sizes and invalid or excessive source dimensions', () => {
+    for (const edge of [-1, 768, NaN, Infinity]) expect(() => resizedDimensions(100, 100, edge)).toThrow();
+    expect(() => resizedDimensions(0, 100, 0)).toThrow();
+    expect(() => resizedDimensions(10000, 10000, 0)).toThrow();
+  });
+});
 
 describe('display helpers', () => {
   it('uses binary file sizes', () => {

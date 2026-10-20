@@ -39,19 +39,6 @@ export async function removeModel(entry: ModelEntry) {
   await cache.delete(modelUrl(entry));
 }
 
-export async function importModel(file: File, entries: ModelEntry[]): Promise<ModelEntry> {
-  const candidates = entries.filter(entry => entry.bytes === file.size);
-  if (!candidates.length) throw new Error('This file does not match any supported BOP model bundle.');
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  const hex = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
-  const entry = candidates.find(candidate => candidate.sha256 === hex);
-  if (!entry) throw new Error('Model SHA-256 is not in this build’s manifest. File was not imported.');
-  const cache = await caches.open(MODEL_CACHE);
-  await cache.put(modelUrl(entry), new Response(bytes, { headers: { 'Content-Type': 'application/octet-stream', 'X-Model-SHA256': entry.sha256 } }));
-  return entry;
-}
-
 /** The library and WASM worker share the same content-addressed, verified cache. */
 export async function getModel(entry: ModelEntry, onProgress?: (received: number, total: number) => void, signal?: AbortSignal): Promise<{ bytes: Uint8Array<ArrayBuffer>; persisted: boolean }> {
   let cache: Cache | undefined;

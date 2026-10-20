@@ -14,8 +14,9 @@ use zenjpegai::nn::fast::{Engine, Tier};
 use zenjpegai::weights::packed::PackedBundle;
 use zenjpegai::{Decoder, Encoder, RgbImage};
 
-const MAX_PIXELS: usize = 1_048_576;
-const MEMORY_LIMIT: u64 = 768 << 20;
+const MAX_PIXELS: usize = 40_000_000;
+// Expensive jobs require browser confirmation above 1.5 GiB; the hard cap is 3 GiB.
+const MEMORY_LIMIT: u64 = 3072 << 20;
 
 #[derive(Clone, Default)]
 struct Models(Arc<RwLock<PackedBundle>>);
@@ -161,8 +162,8 @@ pub fn measure(
     width: usize,
     height: usize,
 ) -> Result<Metrics, &'static str> {
-    validate(original, width, height, 4_194_304)?;
-    validate(decoded, width, height, 4_194_304)?;
+    validate(original, width, height, MAX_PIXELS)?;
+    validate(decoded, width, height, MAX_PIXELS)?;
     let mut squared = 0.0;
     for (a, b) in original.chunks_exact(4).zip(decoded.chunks_exact(4)) {
         for c in 0..3 {
@@ -231,6 +232,33 @@ mod tests {
         assert_eq!(m.mse, 0.0);
         assert_eq!(m.psnr, None);
         assert!((m.ssim - 1.0).abs() < 1e-10);
+    }
+    #[test]
+    fn full_resolution_metrics_are_not_limited_to_four_megapixels() {
+        let pixels = vec![127; 2200 * 2000 * 4];
+        let measured = measure(&pixels, &pixels, 2200, 2000).unwrap();
+        assert_eq!(measured.mse, 0.0);
+        assert!((measured.ssim - 1.0).abs() < 1e-9);
+    }
+    #[test]
+    fn two_k_encode_fits_the_browser_budget() {
+        for rate_matched in [false, true] {
+            let estimate = zenjpegai::encoder::estimate_encode_memory(
+                2048,
+                2048,
+                OperatingPoint::Bop,
+                rate_matched,
+            );
+            assert!(estimate.live_bytes <= MEMORY_LIMIT);
+        }
+    }
+    #[test]
+    fn larger_encodes_fit_the_doubled_budget_but_need_confirmation() {
+        let estimate =
+            zenjpegai::encoder::estimate_encode_memory(3600, 2400, OperatingPoint::Bop, false);
+        assert!(estimate.live_bytes > 1536 << 20);
+        assert!(estimate.live_bytes <= MEMORY_LIMIT);
+        assert_eq!(MEMORY_LIMIT, 3072 << 20);
     }
     #[test]
     fn known_error() {
