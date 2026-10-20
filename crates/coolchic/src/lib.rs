@@ -3,6 +3,7 @@
 mod bits;
 mod entropy;
 mod model;
+pub mod reference;
 mod stream;
 mod train;
 #[cfg(feature = "wasm")]
